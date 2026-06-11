@@ -1,0 +1,21 @@
+.cascade-card { margin-bottom: 1.4rem; }
+.cascade-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1rem;
+}
+.cascade-grid .field { margin-bottom: 0.5rem; }
+
+.explorer-split {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 1.4rem;
+  align-items: start;
+}
+.map-panel { position: sticky; top: 1rem; }
+.map-box { height: 460px; border-radius: 12px; overflow: hidden; }
+
+@media (max-width: 1100px) {
+  .cascade-grid { grid-template-columns: repeat(2, 1fr); }
+  .explorer-split { grid-template-columns: 1fr; }
+}

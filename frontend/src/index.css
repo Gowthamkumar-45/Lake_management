@@ -1,0 +1,126 @@
+/* ============================================================
+   Lake Management System — global theme
+   Two-color palette: deep navy (primary) + teal (accent)
+   ============================================================ */
+:root {
+  --navy: #0f3d5c;
+  --navy-700: #12496e;
+  --navy-600: #1a5c87;
+  --teal: #14b8a6;
+  --teal-600: #0d9488;
+  --teal-50: #effdf9;
+
+  --bg: #f1f5f9;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --text-muted: #64748b;
+
+  --ok: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --info: #2563eb;
+
+  --shadow-sm: 0 1px 2px rgba(15, 61, 92, 0.06);
+  --shadow: 0 4px 16px rgba(15, 61, 92, 0.08);
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--teal-600); text-decoration: none; }
+h1, h2, h3, h4 { color: var(--navy); margin: 0 0 0.5rem; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s, opacity 0.15s;
+}
+.btn:hover { filter: brightness(1.07); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--navy); color: #fff; }
+.btn-accent { background: var(--teal-600); color: #fff; }
+.btn-ghost { background: transparent; color: var(--navy); border: 1px solid var(--border); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-sm { padding: 0.35rem 0.7rem; font-size: 0.8rem; }
+
+/* ---------- Forms ---------- */
+label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.3rem; }
+input, select, textarea {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: #fff;
+  color: var(--text);
+  font-family: inherit;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.15);
+}
+.field { margin-bottom: 1rem; }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
+}
+.card-title { font-size: 1rem; font-weight: 700; color: var(--navy); margin-bottom: 1rem; }
+
+/* ---------- Badges (status) ---------- */
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.badge-UNDER_RENOVATION { background: #fef3c7; color: #92400e; }
+.badge-RENOVATION_COMPLETE { background: #dcfce7; color: #166534; }
+.badge-RENOVATION_PENDING { background: #fee2e2; color: #991b1b; }
+.badge-ENCROACHMENT { background: #ede9fe; color: #5b21b6; }
+.badge-DISAPPEARED { background: #e2e8f0; color: #475569; }
+
+.badge-COMPLETED { background: #dcfce7; color: #166534; }
+.badge-IN_PROGRESS { background: #dbeafe; color: #1e40af; }
+.badge-NOT_STARTED { background: #f1f5f9; color: #475569; }
+.badge-PENDING { background: #fee2e2; color: #991b1b; }
+
+/* ---------- Tables ---------- */
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.7rem 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+th { color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+tbody tr:hover td { background: var(--teal-50); }
+
+/* ---------- Utility ---------- */
+.row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.muted { color: var(--text-muted); }
+.spacer { flex: 1; }
+.error-text { color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem; }
+.empty { text-align: center; color: var(--text-muted); padding: 2rem; }
+.flex { display: flex; align-items: center; gap: 0.6rem; }
