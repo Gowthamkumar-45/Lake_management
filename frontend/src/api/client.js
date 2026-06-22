@@ -1,6 +1,8 @@
 import axios from "axios";
 
-export const API_ROOT = "http://localhost:8000";
+// Backend base URL. Set REACT_APP_API_URL at build time for deployment
+// (e.g. on Render); defaults to the local Django dev server.
+export const API_ROOT = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 const client = axios.create({
   baseURL: `${API_ROOT}/api`,
