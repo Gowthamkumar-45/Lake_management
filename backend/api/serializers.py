@@ -27,6 +27,7 @@ class LocalBodySerializer(serializers.ModelSerializer):
 class WorkEntrySerializer(serializers.ModelSerializer):
     water_body_name = serializers.CharField(source='water_body.name', read_only=True)
     water_body_wb_id = serializers.CharField(source='water_body.wb_id', read_only=True)
+    water_body_survey_number = serializers.CharField(source='water_body.survey_number', read_only=True)
     taluk_name = serializers.CharField(source='water_body.taluk.name', read_only=True)
 
     class Meta:

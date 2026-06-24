@@ -178,7 +178,9 @@ export default function Maintenance() {
                         >
                           <td className="px-4 py-3">
                             <div className="font-medium text-gray-800">{e.water_body_name || '—'}</div>
-                            <div className="text-xs text-accent font-mono">{e.water_body_wb_id}</div>
+                            {e.water_body_survey_number && (
+                              <div className="text-xs text-gray-500 mt-0.5">Survey: {e.water_body_survey_number}</div>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{e.taluk_name || '—'}</td>
                           <td className="px-4 py-3">
