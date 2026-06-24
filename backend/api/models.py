@@ -73,6 +73,8 @@ class WaterBody(models.Model):
     next_inspection = models.DateField(null=True, blank=True)
     work_status = models.CharField(max_length=20, choices=WORK_STATUS_CHOICES, default='Pending')
     reno_status = models.CharField(max_length=30, choices=RENO_STATUS_CHOICES, default='Renovation Pending')
+    survey_number = models.CharField(max_length=50, blank=True)
+    address = models.TextField(blank=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     notes = models.TextField(blank=True)

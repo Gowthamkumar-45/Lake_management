@@ -12,8 +12,8 @@ const TYPES = ['Kanmai', 'Lake', 'Canal', 'Pond', 'River']
 const STATUSES = ['Full', 'Medium', 'Dry']
 const EMPTY_FORM = {
   wb_id: '', name: '', wb_type: 'Kanmai', taluk: '', village: '',
-  status: 'Medium', water_level: 50, area: '', work_status: 'Pending',
-  latitude: '', longitude: '',
+  status: 'Medium', water_level: 50, area: '', survey_number: '', work_status: 'Pending',
+  latitude: '', longitude: '', address: '',
 }
 
 function LocationPicker({ lat, lon, onChange }) {
@@ -72,7 +72,7 @@ function fmt(d) {
 export default function WaterBodies() {
   const { user, toast } = useApp()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [bodies, setBodies] = useState([])
   const [total, setTotal] = useState(0)
@@ -91,6 +91,39 @@ export default function WaterBodies() {
   const [editBody, setEditBody] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [geocoding, setGeocoding] = useState(false)
+  const geocodeTimerRef = useRef(null)
+
+  async function reverseGeocode(lat, lon) {
+    setGeocoding(true)
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`,
+        { headers: { 'Accept-Language': 'en' } }
+      )
+      const data = await res.json()
+      setForm(f => ({ ...f, address: data.display_name || '' }))
+    } catch { } finally { setGeocoding(false) }
+  }
+
+  function handleAddressType(value) {
+    setForm(f => ({ ...f, address: value }))
+    clearTimeout(geocodeTimerRef.current)
+    if (!value.trim()) return
+    geocodeTimerRef.current = setTimeout(async () => {
+      setGeocoding(true)
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&limit=1`,
+          { headers: { 'Accept-Language': 'en' } }
+        )
+        const [result] = await res.json()
+        if (result) {
+          setForm(f => ({ ...f, latitude: parseFloat(result.lat).toFixed(6), longitude: parseFloat(result.lon).toFixed(6) }))
+        }
+      } catch { } finally { setGeocoding(false) }
+    }, 800)
+  }
 
   useEffect(() => {
     geo.taluks().then(d => setTaluks(d.results || d)).catch(() => {})
@@ -113,6 +146,14 @@ export default function WaterBodies() {
 
   useEffect(() => { load() }, [load])
 
+  // Auto-open edit modal when navigated from detail page with ?edit=<id>
+  useEffect(() => {
+    const editId = searchParams.get('edit')
+    if (!editId || bodies.length === 0) return
+    const target = bodies.find(b => String(b.id) === editId)
+    if (target) { openEdit(target); setSearchParams({}, { replace: true }) }
+  }, [bodies, searchParams])
+
   function openAdd() {
     setEditBody(null)
     setForm({ ...EMPTY_FORM, taluk: taluks[0]?.id || '' })
@@ -124,7 +165,9 @@ export default function WaterBodies() {
     setForm({
       name: body.name, wb_type: body.wb_type, taluk: body.taluk,
       village: body.village, status: body.status, water_level: body.water_level,
-      area: body.area, work_status: body.work_status,
+      area: body.area, survey_number: body.survey_number || '',
+      work_status: body.work_status,
+      latitude: body.latitude || '', longitude: body.longitude || '', address: body.address || '',
     })
     setShowModal(true)
   }
@@ -160,8 +203,8 @@ export default function WaterBodies() {
 
   function handleExport() {
     const csv = [
-      ['ID','Name','Type','Taluk','Village','Status','Level%','Area','Work Status'],
-      ...bodies.map(b => [b.wb_id, b.name, b.wb_type, b.taluk_name, b.village, b.status, b.water_level, b.area, b.work_status])
+      ['Survey No.','Name','Type','Taluk','Village','Status','Level%','Area','Work Status'],
+      ...bodies.map(b => [b.survey_number || '', b.name, b.wb_type, b.taluk_name, b.village, b.status, b.water_level, b.area, b.work_status])
     ].map(r => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -208,7 +251,7 @@ export default function WaterBodies() {
           </select>
           <select className="input w-auto" value={filterWork} onChange={e => { setFilterWork(e.target.value); setPage(1) }}>
             <option value="">All Work</option>
-            {['Completed','In Progress','Pending','Delayed'].map(s => <option key={s}>{s}</option>)}
+            {['Completed','In Progress','Pending','Not Started'].map(s => <option key={s}>{s}</option>)}
           </select>
           {(search || filterTaluk || filterType || filterStatus || filterWork || filterReno) && (
             <button className="btn-secondary" onClick={() => { setSearch(''); setFilterTaluk(''); setFilterType(''); setFilterStatus(''); setFilterWork(''); setFilterReno(''); setPage(1) }}>Clear</button>
@@ -224,7 +267,7 @@ export default function WaterBodies() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  {['WB ID','Name','Type','Taluk','Village','Status','Water Level','Area','Last Insp.','Next Insp.','Work Status',''].map(h => (
+                  {['Survey No.','Name','Type','Taluk','Village','Status','Water Level','Area','Last Insp.','Next Insp.','Work Status',''].map(h => (
                     <th key={h} className="table-head px-4 py-3 text-left whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -234,12 +277,12 @@ export default function WaterBodies() {
                   <tr><td colSpan={12} className="text-center py-12 text-gray-400">No records match.</td></tr>
                 )}
                 {bodies.map(body => (
-                  <tr key={body.id} className="border-b border-gray-50 hover:bg-blue-50/30 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs font-semibold text-accent whitespace-nowrap">
-                      <button className="hover:underline" onClick={() => navigate(`/water-bodies/${body.id}`)}>{body.wb_id}</button>
+                  <tr key={body.id} className="border-b border-gray-50 hover:bg-blue-50/30 transition-colors cursor-pointer" onClick={() => navigate(`/water-bodies/${body.id}`)}>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">
+                      {body.survey_number || '—'}
                     </td>
                     <td className="px-4 py-3 font-medium text-gray-800 max-w-[180px] truncate whitespace-nowrap">
-                      <button className="hover:text-accent text-left" onClick={() => navigate(`/water-bodies/${body.id}`)}>{body.name}</button>
+                      {body.name}
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{body.wb_type}</td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{body.taluk_name}</td>
@@ -250,7 +293,7 @@ export default function WaterBodies() {
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap text-xs">{fmt(body.last_inspection)}</td>
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap text-xs">{fmt(body.next_inspection)}</td>
                     <td className="px-4 py-3 whitespace-nowrap"><StatusBadge status={body.work_status} /></td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
                         <button className="w-7 h-7 rounded text-gray-400 hover:text-accent hover:bg-accent/10 flex items-center justify-center" onClick={() => navigate(`/water-bodies/${body.id}`)}>
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
@@ -300,12 +343,10 @@ export default function WaterBodies() {
                 {taluks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </div>
-            {!editBody && (
-              <div className="col-span-2">
-                <label className="label">WB ID <span className="text-gray-400 font-normal">(optional — auto-generated if left blank)</span></label>
-                <input className="input font-mono" value={form.wb_id} onChange={e => setForm(f => ({ ...f, wb_id: e.target.value }))} placeholder="e.g. WB-KAD-0149 — leave blank to auto-generate" />
-              </div>
-            )}
+            <div className="col-span-2">
+              <label className="label">Survey Number</label>
+              <input className="input" value={form.survey_number || ''} onChange={e => setForm(f => ({ ...f, survey_number: e.target.value }))} placeholder="e.g. 123/4A" />
+            </div>
             <div>
               <label className="label">Village</label>
               <input className="input" value={form.village} onChange={e => setForm(f => ({ ...f, village: e.target.value }))} />
@@ -327,7 +368,7 @@ export default function WaterBodies() {
             <div className="col-span-2">
               <label className="label">Work Status</label>
               <select className="input" value={form.work_status} onChange={e => setForm(f => ({ ...f, work_status: e.target.value }))}>
-                {['Completed','In Progress','Pending','Delayed'].map(s => <option key={s}>{s}</option>)}
+                {['Completed','In Progress','Pending','Not Started'].map(s => <option key={s}>{s}</option>)}
               </select>
             </div>
             <div className="col-span-2 space-y-2">
@@ -338,11 +379,10 @@ export default function WaterBodies() {
                   onClick={() => {
                     if (!navigator.geolocation) return
                     navigator.geolocation.getCurrentPosition(pos => {
-                      setForm(f => ({
-                        ...f,
-                        latitude: pos.coords.latitude.toFixed(6),
-                        longitude: pos.coords.longitude.toFixed(6),
-                      }))
+                      const lat = pos.coords.latitude.toFixed(6)
+                      const lon = pos.coords.longitude.toFixed(6)
+                      setForm(f => ({ ...f, latitude: lat, longitude: lon }))
+                      reverseGeocode(lat, lon)
                     }, () => {})
                   }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 21s7-5.2 7-11a7 7 0 10-14 0c0 5.8 7 11 7 11Z" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" strokeWidth="2"/></svg>
@@ -353,7 +393,10 @@ export default function WaterBodies() {
               <LocationPicker
                 lat={form.latitude}
                 lon={form.longitude}
-                onChange={(lat, lon) => setForm(f => ({ ...f, latitude: lat, longitude: lon }))}
+                onChange={(lat, lon) => {
+                  setForm(f => ({ ...f, latitude: lat, longitude: lon }))
+                  reverseGeocode(lat, lon)
+                }}
               />
               {form.latitude && form.longitude && (
                 <div className="flex items-center gap-2 text-xs font-mono text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">
@@ -361,6 +404,23 @@ export default function WaterBodies() {
                   {form.latitude}°N, {form.longitude}°E
                 </div>
               )}
+              <div>
+                <label className="label">Address</label>
+                <div className="relative">
+                  <input
+                    className="input pr-8"
+                    placeholder={geocoding ? 'Fetching address…' : 'Type or auto-filled from map pin'}
+                    value={form.address}
+                    onChange={e => handleAddressType(e.target.value)}
+                  />
+                  {geocoding && (
+                    <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
           <div className="flex gap-3 mt-6 pt-4 border-t border-gray-100">
