@@ -8,9 +8,9 @@ from django.db.models import Count, Q
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import date
-from .models import District, Taluk, LocalBody, WaterBody, WorkEntry, Photo, OfficerProfile, MaintenanceSchedule, WorkforceEntry, MachineEntry, FundEntry, WaterLevelRecord, WaterBodyAssignment, Notification, AuditLog, InflowSource, OutflowSource
+from .models import District, Taluk, LocalBody, Village, WaterBody, WorkEntry, Photo, OfficerProfile, MaintenanceSchedule, WorkforceEntry, MachineEntry, FundEntry, WaterLevelRecord, WaterBodyAssignment, Notification, AuditLog, InflowSource, OutflowSource
 from .serializers import (
-    DistrictSerializer, TalukSerializer, LocalBodySerializer,
+    DistrictSerializer, TalukSerializer, LocalBodySerializer, VillageSerializer,
     WaterBodyListSerializer, WaterBodyDetailSerializer,
     WorkEntrySerializer, PhotoSerializer, OfficerProfileSerializer,
     MaintenanceScheduleSerializer, WorkforceEntrySerializer, MachineEntrySerializer, FundEntrySerializer,
@@ -205,7 +205,7 @@ class TalukViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class LocalBodyViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = LocalBody.objects.select_related('taluk').all()
+    queryset = LocalBody.objects.select_related('taluk').prefetch_related('villages').all()
     serializer_class = LocalBodySerializer
 
     def get_queryset(self):
@@ -214,6 +214,53 @@ class LocalBodyViewSet(viewsets.ReadOnlyModelViewSet):
         if taluk:
             qs = qs.filter(taluk__name=taluk)
         return qs
+
+
+class VillageViewSet(viewsets.ModelViewSet):
+    queryset = Village.objects.select_related('panchayat__taluk').all()
+    serializer_class = VillageSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        panchayat = self.request.query_params.get('panchayat')
+        if panchayat:
+            qs = qs.filter(panchayat_id=panchayat)
+        return qs
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def geo_hierarchy_view(request):
+    """Returns full 4-level geo hierarchy: Division → Taluk → Panchayat → Village"""
+    district = District.objects.first()
+    taluks = Taluk.objects.select_related('district').prefetch_related(
+        'local_bodies__villages'
+    ).all().order_by('division', 'name')
+
+    divisions = {}
+    for taluk in taluks:
+        div = taluk.division or 'Unassigned'
+        if div not in divisions:
+            divisions[div] = []
+        panchayats = []
+        for lb in taluk.local_bodies.all().order_by('name'):
+            panchayats.append({
+                'id': lb.id,
+                'name': lb.name,
+                'type': lb.lb_type,
+                'villages': [{'id': v.id, 'name': v.name} for v in lb.villages.all().order_by('name')],
+            })
+        divisions[div].append({
+            'id': taluk.id,
+            'name': taluk.name,
+            'panchayats': panchayats,
+            'wb_count': taluk.water_bodies.count(),
+        })
+
+    return Response({
+        'district': district.name if district else 'Ramanathapuram',
+        'divisions': [{'name': k, 'taluks': v} for k, v in sorted(divisions.items())],
+    })
 
 
 class WaterBodyViewSet(viewsets.ModelViewSet):

@@ -6,6 +6,7 @@ router = DefaultRouter()
 router.register('districts', views.DistrictViewSet)
 router.register('taluks', views.TalukViewSet)
 router.register('local-bodies', views.LocalBodyViewSet)
+router.register('villages', views.VillageViewSet)
 router.register('water-bodies', views.WaterBodyViewSet)
 router.register('work-entries', views.WorkEntryViewSet)
 router.register('photos', views.PhotoViewSet)
@@ -28,4 +29,5 @@ urlpatterns = [
     path('auth/me/', views.me_view, name='me'),
     path('stats/', views.stats_view, name='stats'),
     path('recent-updates/', views.recent_updates_view, name='recent-updates'),
+    path('geo/hierarchy/', views.geo_hierarchy_view, name='geo-hierarchy'),
 ]

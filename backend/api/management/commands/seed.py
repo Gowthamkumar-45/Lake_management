@@ -7,35 +7,46 @@ from datetime import date, timedelta
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
-from api.models import District, Taluk, LocalBody, WaterBody, WorkEntry, OfficerProfile, MaintenanceSchedule
+from api.models import District, Taluk, LocalBody, Village, WaterBody, WorkEntry, OfficerProfile, MaintenanceSchedule
 
 
-TALUKS = [
-    'Ramanathapuram', 'Paramakudi', 'Tiruvadanai', 'Kamuthi',
-    'Mudukulathur', 'Rajasingamangalam', 'Kadaladi', 'Mandapam',
-]
+# Revenue Divisions → Taluks
+DIVISIONS = {
+    'Ramanathapuram Division': [
+        'Ramanathapuram', 'Rameswaram', 'Tiruvadanai', 'Kilakarai',
+    ],
+    'Paramakudi Division': [
+        'Paramakudi', 'Kamuthi', 'Mudukulathur', 'Kadaladi', 'RS Mangalam',
+    ],
+}
 
 LOCAL_BODIES = {
     'Ramanathapuram': [
         ('Ramanathapuram Municipality', 'Municipality'),
+        ('Thiruvangundram Panchayat', 'Panchayat'),
+        ('Uchipuli Panchayat', 'Panchayat'),
+        ('Thondi Panchayat', 'Panchayat'),
+    ],
+    'Remeswaram': [
         ('Rameswaram Municipality', 'Municipality'),
         ('Pamban Town Panchayat', 'Town Panchayat'),
         ('Mandapam Town Panchayat', 'Town Panchayat'),
-        ('Uchipuli Panchayat', 'Panchayat'),
+    ],
+    'Tiruvadanai': [
+        ('Tiruvadanai Town Panchayat', 'Town Panchayat'),
+        ('Ervadi Panchayat', 'Panchayat'),
+        ('Devipattinam Panchayat', 'Panchayat'),
+        ('Muthupettai Panchayat', 'Panchayat'),
+    ],
+    'Kilakarai': [
+        ('Kilakarai Town Panchayat', 'Town Panchayat'),
         ('Keezhakkarai Panchayat', 'Panchayat'),
+        ('Alagankulam Panchayat', 'Panchayat'),
     ],
     'Paramakudi': [
         ('Paramakudi Municipality', 'Municipality'),
         ('Sayalkudi Town Panchayat', 'Town Panchayat'),
-        ('Mudukulathur Town Panchayat', 'Town Panchayat'),
-        ('Kamuthi Town Panchayat', 'Town Panchayat'),
-        ('Sivaganga Panchayat', 'Panchayat'),
-    ],
-    'Tiruvadanai': [
-        ('Tiruvadanai Town Panchayat', 'Town Panchayat'),
-        ('Kilakarai Town Panchayat', 'Town Panchayat'),
-        ('Ervadi Panchayat', 'Panchayat'),
-        ('Devipattinam Panchayat', 'Panchayat'),
+        ('Perunali Panchayat', 'Panchayat'),
     ],
     'Kamuthi': [
         ('Kamuthi Town Panchayat', 'Town Panchayat'),
@@ -47,30 +58,40 @@ LOCAL_BODIES = {
         ('Keeranur Panchayat', 'Panchayat'),
         ('Ilayankudi Panchayat', 'Panchayat'),
     ],
-    'Rajasingamangalam': [
-        ('Rajasingamangalam Panchayat', 'Panchayat'),
-        ('Nainarkoil Panchayat', 'Panchayat'),
-    ],
     'Kadaladi': [
         ('Kadaladi Panchayat', 'Panchayat'),
         ('Sattankulam Panchayat', 'Panchayat'),
+        ('Veeriyavan Panchayat', 'Panchayat'),
     ],
-    'Mandapam': [
-        ('Mandapam Town Panchayat', 'Town Panchayat'),
-        ('Rameswaram Panchayat', 'Panchayat'),
+    'RS Mangalam': [
+        ('RS Mangalam Panchayat', 'Panchayat'),
+        ('Nainarkoil Panchayat', 'Panchayat'),
+        ('Sembanarkoil Panchayat', 'Panchayat'),
     ],
 }
 
 VILLAGES = {
-    'Ramanathapuram': ['Ramanathapuram', 'Pamban', 'Rameswaram', 'Uchipuli', 'Keezhakkarai', 'Mandapam', 'Thiruvangundram', 'Thondi'],
-    'Paramakudi': ['Paramakudi', 'Sayalkudi', 'Mudukulathur', 'Sattankulam', 'Ilayangudi', 'Keeranur', 'Perunali'],
-    'Tiruvadanai': ['Tiruvadanai', 'Kilakarai', 'Ervadi', 'Devipattinam', 'Alagankulam', 'Muthupettai'],
-    'Kamuthi': ['Kamuthi', 'Thiruppullani', 'Abiramam', 'Siruthoppu', 'Ramanathapuram Panchayat'],
+    'Ramanathapuram': ['Ramanathapuram', 'Uchipuli', 'Thiruvangundram', 'Thondi', 'Keezhakkarai'],
+    'Remeswaram': ['Rameswaram', 'Pamban', 'Mandapam', 'Uchipuli South'],
+    'Tiruvadanai': ['Tiruvadanai', 'Ervadi', 'Devipattinam', 'Muthupettai', 'Alagankulam'],
+    'Kilakarai': ['Kilakarai', 'Keezhakkarai', 'Alagankulam'],
+    'Paramakudi': ['Paramakudi', 'Sayalkudi', 'Perunali', 'Ilayangudi'],
+    'Kamuthi': ['Kamuthi', 'Thiruppullani', 'Abiramam', 'Siruthoppu'],
     'Mudukulathur': ['Mudukulathur', 'Keeranur', 'Ilayankudi', 'Melur', 'Nambarai'],
-    'Rajasingamangalam': ['Rajasingamangalam', 'Nainarkoil', 'Thiruvadanai South', 'Sembanarkoil'],
     'Kadaladi': ['Kadaladi', 'Sattankulam', 'Veeriyavan', 'Thambipuram'],
-    'Mandapam': ['Mandapam', 'Rameswaram', 'Pamban North', 'Uchipuli South'],
+    'RS Mangalam': ['RS Mangalam', 'Nainarkoil', 'Sembanarkoil', 'Thiruvadanai South'],
 }
+
+OFFICERS = [
+    ('M. Rajesh', 'AE', 'Ramanathapuram', 'MR', 'rajesh'),
+    ('V. Anand', 'AE', 'Remeswaram', 'VA', 'anand'),
+    ('S. Devan', 'AEE', 'Kamuthi', 'SD', 'devan'),
+    ('K. Suresh', 'AE', 'Paramakudi', 'KS', 'suresh'),
+    ('P. Kumar', 'JE', 'Tiruvadanai', 'PK', 'kumar'),
+    ('R. Priya', 'AEE', 'Mudukulathur', 'RP', 'priya'),
+    ('T. Selvan', 'AE', 'Kadaladi', 'TS', 'selvan'),
+    ('N. Velu', 'JE', 'RS Mangalam', 'NV', 'velu'),
+]
 
 WB_TYPES = ['Kanmai', 'Kanmai', 'Kanmai', 'Lake', 'Lake', 'Canal', 'Pond']
 STATUSES = ['Full', 'Full', 'Medium', 'Medium', 'Medium', 'Dry']
@@ -87,17 +108,6 @@ WORK_NAMES = [
     'Inlet channel repair',
     'Outlet channel restoration',
     'Embankment protection work',
-]
-
-OFFICERS = [
-    ('M. Rajesh', 'AE', 'Ramanathapuram', 'MR', 'rajesh'),
-    ('V. Anand', 'AE', 'Mandapam', 'VA', 'anand'),
-    ('S. Devan', 'AEE', 'Kamuthi', 'SD', 'devan'),
-    ('K. Suresh', 'AE', 'Paramakudi', 'KS', 'suresh'),
-    ('P. Kumar', 'JE', 'Tiruvadanai', 'PK', 'kumar'),
-    ('R. Priya', 'AEE', 'Mudukulathur', 'RP', 'priya'),
-    ('T. Selvan', 'AE', 'Kadaladi', 'TS', 'selvan'),
-    ('N. Velu', 'JE', 'Rajasingamangalam', 'NV', 'velu'),
 ]
 
 MAINT_TITLES = [
@@ -121,19 +131,38 @@ class Command(BaseCommand):
         # District
         district, _ = District.objects.get_or_create(name='Ramanathapuram')
 
-        # Taluks
+        # Taluks — created per revenue division
         taluk_objs = {}
-        for tname in TALUKS:
-            t, _ = Taluk.objects.get_or_create(district=district, name=tname)
-            taluk_objs[tname] = t
+        for division_name, taluk_names in DIVISIONS.items():
+            for tname in taluk_names:
+                t, _ = Taluk.objects.get_or_create(
+                    district=district, name=tname,
+                    defaults={'division': division_name}
+                )
+                if t.division != division_name:
+                    t.division = division_name
+                    t.save()
+                taluk_objs[tname] = t
 
-        # Local bodies
+        # Local bodies (panchayats) under each taluk
         for tname, lbs in LOCAL_BODIES.items():
+            if tname not in taluk_objs:
+                continue
             for lb_name, lb_type in lbs:
                 LocalBody.objects.get_or_create(
                     taluk=taluk_objs[tname], name=lb_name,
                     defaults={'lb_type': lb_type}
                 )
+
+        # Villages — seed known villages under first panchayat of each taluk
+        for tname, village_names in VILLAGES.items():
+            if tname not in taluk_objs:
+                continue
+            panchayat = LocalBody.objects.filter(taluk=taluk_objs[tname]).first()
+            if not panchayat:
+                continue
+            for vname in village_names:
+                Village.objects.get_or_create(panchayat=panchayat, name=vname)
 
         # Officers + Users
         # Superuser / admin
@@ -175,14 +204,15 @@ class Command(BaseCommand):
                 )
                 Token.objects.get_or_create(user=u)
 
-        # Water bodies — generate ~1284 spread across taluks
+        # Water bodies — generate spread across taluks
         TALUK_COUNTS = {
             'Ramanathapuram': 214, 'Paramakudi': 198, 'Tiruvadanai': 176,
-            'Mudukulathur': 152, 'Kamuthi': 141, 'Mandapam': 118,
-            'Kadaladi': 148, 'Rajasingamangalam': 137,
+            'Mudukulathur': 152, 'Kamuthi': 141, 'Remeswaram': 118,
+            'Kadaladi': 148, 'RS Mangalam': 137, 'Kilakarai': 141,
         }
+        all_taluk_names = [t for names in DIVISIONS.values() for t in names]
         existing_ids = set(WaterBody.objects.values_list('wb_id', flat=True))
-        wb_counter = {t: 1 for t in TALUKS}
+        wb_counter = {t: 1 for t in all_taluk_names}
         today = date.today()
 
         for tname, count in TALUK_COUNTS.items():

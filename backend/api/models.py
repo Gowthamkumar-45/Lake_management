@@ -12,6 +12,7 @@ class District(models.Model):
 class Taluk(models.Model):
     district = models.ForeignKey(District, on_delete=models.CASCADE, related_name='taluks')
     name = models.CharField(max_length=100)
+    division = models.CharField(max_length=100, blank=True, default='')
 
     class Meta:
         unique_together = ('district', 'name')
@@ -25,10 +26,19 @@ class LocalBody(models.Model):
         ('Municipality', 'Municipality'),
         ('Town Panchayat', 'Town Panchayat'),
         ('Panchayat', 'Panchayat'),
+        ('Block', 'Block'),
     ]
     taluk = models.ForeignKey(Taluk, on_delete=models.CASCADE, related_name='local_bodies')
     name = models.CharField(max_length=100)
     lb_type = models.CharField(max_length=30, choices=LB_TYPES)
+
+    def __str__(self):
+        return self.name
+
+
+class Village(models.Model):
+    panchayat = models.ForeignKey(LocalBody, on_delete=models.CASCADE, related_name='villages')
+    name = models.CharField(max_length=100)
 
     def __str__(self):
         return self.name

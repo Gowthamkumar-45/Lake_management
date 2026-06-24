@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import District, Taluk, LocalBody, WaterBody, WorkEntry, Photo, OfficerProfile, MaintenanceSchedule, WorkforceEntry, MachineEntry, FundEntry, WaterLevelRecord, WaterBodyAssignment, Notification, AuditLog, InflowSource, OutflowSource
+from .models import District, Taluk, LocalBody, Village, WaterBody, WorkEntry, Photo, OfficerProfile, MaintenanceSchedule, WorkforceEntry, MachineEntry, FundEntry, WaterLevelRecord, WaterBodyAssignment, Notification, AuditLog, InflowSource, OutflowSource
 
 
 class DistrictSerializer(serializers.ModelSerializer):
@@ -16,8 +16,15 @@ class TalukSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class VillageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Village
+        fields = '__all__'
+
+
 class LocalBodySerializer(serializers.ModelSerializer):
     taluk_name = serializers.CharField(source='taluk.name', read_only=True)
+    villages = VillageSerializer(many=True, read_only=True)
 
     class Meta:
         model = LocalBody
