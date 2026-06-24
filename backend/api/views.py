@@ -204,8 +204,8 @@ class TalukViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['name']
 
 
-class LocalBodyViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = LocalBody.objects.select_related('taluk').prefetch_related('villages').all()
+class LocalBodyViewSet(viewsets.ModelViewSet):
+    queryset = LocalBody.objects.select_related('taluk').prefetch_related('villages', 'children__villages').all()
     serializer_class = LocalBodySerializer
 
     def get_queryset(self):
@@ -213,6 +213,9 @@ class LocalBodyViewSet(viewsets.ReadOnlyModelViewSet):
         taluk = self.request.query_params.get('taluk')
         if taluk:
             qs = qs.filter(taluk__name=taluk)
+        lb_type = self.request.query_params.get('type')
+        if lb_type:
+            qs = qs.filter(lb_type=lb_type)
         return qs
 
 
@@ -231,29 +234,48 @@ class VillageViewSet(viewsets.ModelViewSet):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def geo_hierarchy_view(request):
-    """Returns full 4-level geo hierarchy: Division → Taluk → Panchayat → Village"""
+    """Returns full hierarchy: Division → Taluk → Block → Panchayat → Village"""
     district = District.objects.first()
     taluks = Taluk.objects.select_related('district').prefetch_related(
-        'local_bodies__villages'
+        'local_bodies__villages',
+        'local_bodies__children__villages',
     ).all().order_by('division', 'name')
+
+    def build_panchayat(lb):
+        return {
+            'id': lb.id,
+            'name': lb.name,
+            'type': lb.lb_type,
+            'villages': [{'id': v.id, 'name': v.name} for v in lb.villages.all().order_by('name')],
+        }
 
     divisions = {}
     for taluk in taluks:
         div = taluk.division or 'Unassigned'
         if div not in divisions:
             divisions[div] = []
-        panchayats = []
-        for lb in taluk.local_bodies.all().order_by('name'):
-            panchayats.append({
-                'id': lb.id,
-                'name': lb.name,
-                'type': lb.lb_type,
-                'villages': [{'id': v.id, 'name': v.name} for v in lb.villages.all().order_by('name')],
-            })
+
+        blocks = []
+        standalone_panchayats = []
+
+        for lb in taluk.local_bodies.filter(parent__isnull=True).order_by('name'):
+            if lb.lb_type == 'Block':
+                panchayats_under_block = [build_panchayat(child) for child in lb.children.all().order_by('name')]
+                blocks.append({
+                    'id': lb.id,
+                    'name': lb.name,
+                    'type': lb.lb_type,
+                    'panchayats': panchayats_under_block,
+                    'villages': [{'id': v.id, 'name': v.name} for v in lb.villages.all().order_by('name')],
+                })
+            else:
+                standalone_panchayats.append(build_panchayat(lb))
+
         divisions[div].append({
             'id': taluk.id,
             'name': taluk.name,
-            'panchayats': panchayats,
+            'blocks': blocks,
+            'panchayats': standalone_panchayats,
             'wb_count': taluk.water_bodies.count(),
         })
 

@@ -22,9 +22,18 @@ class VillageSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class PanchayatSerializer(serializers.ModelSerializer):
+    villages = VillageSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = LocalBody
+        fields = ['id', 'name', 'lb_type', 'parent', 'villages']
+
+
 class LocalBodySerializer(serializers.ModelSerializer):
     taluk_name = serializers.CharField(source='taluk.name', read_only=True)
     villages = VillageSerializer(many=True, read_only=True)
+    children = PanchayatSerializer(many=True, read_only=True)
 
     class Meta:
         model = LocalBody

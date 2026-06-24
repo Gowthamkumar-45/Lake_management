@@ -31,6 +31,7 @@ class LocalBody(models.Model):
     taluk = models.ForeignKey(Taluk, on_delete=models.CASCADE, related_name='local_bodies')
     name = models.CharField(max_length=100)
     lb_type = models.CharField(max_length=30, choices=LB_TYPES)
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='children')
 
     def __str__(self):
         return self.name

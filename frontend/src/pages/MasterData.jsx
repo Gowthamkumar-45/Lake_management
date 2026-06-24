@@ -31,7 +31,7 @@ function DelBtn({ onClick }) {
   )
 }
 
-// ── mini modal for hierarchy CRUD ─────────────────────────────────────────────
+// ── mini modal for CRUD ───────────────────────────────────────────────────────
 function MiniModal({ title, fields, onSave, onClose, saving }) {
   const [vals, setVals] = useState(() => {
     const obj = {}; fields.forEach(f => { obj[f.key] = f.default || '' }); return obj
@@ -67,12 +67,10 @@ function MiniModal({ title, fields, onSave, onClose, saving }) {
   )
 }
 
-// ── CSV helper ────────────────────────────────────────────────────────────────
-function makeCSV(headers, rows) {
-  return [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
-}
+// ── CSV helpers ───────────────────────────────────────────────────────────────
 function downloadCSV(filename, headers, rows) {
-  const blob = new Blob([makeCSV(headers, rows)], { type: 'text/csv' })
+  const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
   URL.revokeObjectURL(url)
@@ -92,44 +90,49 @@ const GEO_TABS = [
   {
     key: 'taluk',
     label: 'Taluks',
-    color: 'text-blue-700',
-    bg: 'bg-blue-50',
-    border: 'border-blue-200',
+    color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200',
     headers: ['taluk_name', 'division'],
     example: [
       ['Rameswaram', 'Ramanathapuram Division'],
       ['Kamuthi', 'Paramakudi Division'],
-      ['Mudukulathur', 'Paramakudi Division'],
     ],
-    note: 'division must match exactly: "Ramanathapuram Division" or "Paramakudi Division"',
+    note: 'division: "Ramanathapuram Division" or "Paramakudi Division"',
+  },
+  {
+    key: 'block',
+    label: 'Blocks',
+    color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200',
+    headers: ['taluk_name', 'block_name'],
+    example: [
+      ['Rameswaram', 'Rameswaram Block'],
+      ['Rameswaram', 'Mandapam Block'],
+      ['Kamuthi', 'Kamuthi Block'],
+    ],
+    note: 'taluk_name must already exist. Blocks are the level directly under Taluk.',
   },
   {
     key: 'panchayat',
-    label: 'Panchayats / Blocks',
-    color: 'text-orange-700',
-    bg: 'bg-orange-50',
-    border: 'border-orange-200',
-    headers: ['taluk_name', 'panchayat_name', 'type'],
+    label: 'Panchayats',
+    color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200',
+    headers: ['taluk_name', 'block_name', 'panchayat_name', 'type'],
     example: [
-      ['Rameswaram', 'Pamban Town Panchayat', 'Town Panchayat'],
-      ['Rameswaram', 'Mandapam Town Panchayat', 'Town Panchayat'],
-      ['Kamuthi', 'Abiramam Panchayat', 'Panchayat'],
+      ['Rameswaram', 'Rameswaram Block', 'Pamban Town Panchayat', 'Town Panchayat'],
+      ['Rameswaram', 'Rameswaram Block', 'Mandapam Panchayat', 'Panchayat'],
+      ['Kamuthi', 'Kamuthi Block', 'Abiramam Panchayat', 'Panchayat'],
     ],
-    note: 'type options: Municipality | Town Panchayat | Panchayat | Block',
+    note: 'block_name must exist under that taluk. type: Municipality | Town Panchayat | Panchayat',
   },
   {
     key: 'village',
     label: 'Villages',
-    color: 'text-gray-700',
-    bg: 'bg-gray-50',
-    border: 'border-gray-200',
+    color: 'text-gray-700', bg: 'bg-gray-50', border: 'border-gray-200',
     headers: ['taluk_name', 'panchayat_name', 'village_name'],
     example: [
       ['Rameswaram', 'Pamban Town Panchayat', 'Pamban'],
       ['Rameswaram', 'Pamban Town Panchayat', 'Uchipuli South'],
       ['Kamuthi', 'Abiramam Panchayat', 'Siruthoppu'],
     ],
-    note: 'taluk_name and panchayat_name must already exist in the system',
+    note: 'panchayat_name must already exist in the system',
   },
 ]
 
@@ -140,11 +143,9 @@ function GeoBulkModal({ onClose, taluks, localBodies, onDone, toast }) {
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState(null)
   const fileRef = useRef(null)
-
   const cfg = GEO_TABS.find(t => t.key === geoTab)
 
   function switchTab(key) { setGeoTab(key); setCsvFile(null); setCsvRows([]); setResult(null) }
-
   function handleFile(file) {
     if (!file) return
     setCsvFile(file); setResult(null)
@@ -157,30 +158,33 @@ function GeoBulkModal({ onClose, taluks, localBodies, onDone, toast }) {
     if (!csvRows.length) return
     setUploading(true); setResult(null)
     let success = 0, failed = 0, errors = []
-
     for (const row of csvRows) {
       try {
         if (geoTab === 'taluk') {
-          const district_id = 1
-          await geo.addTaluk({ district: district_id, name: row.taluk_name, division: row.division })
+          await geo.addTaluk({ district: 1, name: row.taluk_name, division: row.division })
+        } else if (geoTab === 'block') {
+          const taluk = taluks.find(t => t.name.toLowerCase() === row.taluk_name.toLowerCase())
+          if (!taluk) throw new Error(`Taluk "${row.taluk_name}" not found`)
+          await geo.addLocalBody({ taluk: taluk.id, name: row.block_name, lb_type: 'Block', parent: null })
         } else if (geoTab === 'panchayat') {
           const taluk = taluks.find(t => t.name.toLowerCase() === row.taluk_name.toLowerCase())
           if (!taluk) throw new Error(`Taluk "${row.taluk_name}" not found`)
-          await geo.addLocalBody({ taluk: taluk.id, name: row.panchayat_name, lb_type: row.type || 'Panchayat' })
+          const allLbs = Array.isArray(localBodies) ? localBodies : (localBodies.results || [])
+          const block = allLbs.find(b => b.lb_type === 'Block' && b.name.toLowerCase() === row.block_name.toLowerCase())
+          if (!block) throw new Error(`Block "${row.block_name}" not found`)
+          await geo.addLocalBody({ taluk: taluk.id, name: row.panchayat_name, lb_type: row.type || 'Panchayat', parent: block.id })
         } else if (geoTab === 'village') {
-          const allBodies = localBodies.length ? localBodies : await geo.localBodies()
-          const body = (Array.isArray(allBodies) ? allBodies : allBodies.results || [])
-            .find(b => b.name.toLowerCase() === row.panchayat_name.toLowerCase())
-          if (!body) throw new Error(`Panchayat "${row.panchayat_name}" not found`)
-          await geo.addVillage({ panchayat: body.id, name: row.village_name })
+          const allLbs = Array.isArray(localBodies) ? localBodies : (localBodies.results || [])
+          const panchayat = allLbs.find(b => b.name.toLowerCase() === row.panchayat_name.toLowerCase())
+          if (!panchayat) throw new Error(`Panchayat "${row.panchayat_name}" not found`)
+          await geo.addVillage({ panchayat: panchayat.id, name: row.village_name })
         }
         success++
       } catch (err) {
         failed++
-        errors.push(`${row.taluk_name || row.panchayat_name || row.village_name || '?'}: ${err.message}`)
+        errors.push(`${Object.values(row).join('/')} → ${err.message}`)
       }
     }
-
     setResult({ success, failed, errors })
     setUploading(false)
     if (success > 0) { toast(`${success} records added!`, 'success'); onDone() }
@@ -189,7 +193,6 @@ function GeoBulkModal({ onClose, taluks, localBodies, onDone, toast }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-        {/* header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 shrink-0">
           <h3 className="font-heading font-bold text-lg text-gray-800">Bulk Upload — Geographic Hierarchy</h3>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400">✕</button>
@@ -199,33 +202,29 @@ function GeoBulkModal({ onClose, taluks, localBodies, onDone, toast }) {
         <div className="flex gap-1 bg-gray-100 rounded-xl p-1 mx-6 mt-4 shrink-0">
           {GEO_TABS.map(t => (
             <button key={t.key} onClick={() => switchTab(t.key)}
-              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${geoTab === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              className={`flex-1 px-2 py-2 rounded-lg text-xs font-semibold transition-all ${geoTab === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
               {t.label}
             </button>
           ))}
         </div>
 
         <div className="overflow-y-auto px-6 py-4 space-y-4">
-          {/* note */}
           <div className={`rounded-xl px-4 py-2.5 border text-xs ${cfg.bg} ${cfg.border} ${cfg.color}`}>
             <span className="font-semibold">Note: </span>{cfg.note}
           </div>
 
-          {/* step 1 — download */}
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between gap-4">
             <div>
               <p className="font-semibold text-blue-800 text-sm">Step 1 — Download Template</p>
               <p className="text-[11px] text-blue-500 font-mono mt-1">Columns: {cfg.headers.join('  |  ')}</p>
             </div>
-            <button
-              onClick={() => downloadCSV(`${geoTab}_template.csv`, cfg.headers, cfg.example)}
+            <button onClick={() => downloadCSV(`${geoTab}_template.csv`, cfg.headers, cfg.example)}
               className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               Download CSV
             </button>
           </div>
 
-          {/* step 2 — upload */}
           <div>
             <p className="font-semibold text-gray-700 text-sm mb-2">Step 2 — Fill & Upload</p>
             <div className="border-2 border-dashed border-gray-200 rounded-xl p-5 flex flex-col items-center gap-2 hover:border-accent/50 hover:bg-accent/5 transition-colors cursor-pointer"
@@ -234,14 +233,13 @@ function GeoBulkModal({ onClose, taluks, localBodies, onDone, toast }) {
               onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }}>
               <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
               {csvFile
-                ? <div className="text-center"><p className="font-semibold text-accent text-sm">{csvFile.name}</p><p className="text-xs text-gray-400">{csvRows.length} rows ready to upload</p></div>
+                ? <div className="text-center"><p className="font-semibold text-accent text-sm">{csvFile.name}</p><p className="text-xs text-gray-400">{csvRows.length} rows ready</p></div>
                 : <div className="text-center"><p className="text-sm font-medium text-gray-600">Click to select or drag & drop CSV</p><p className="text-xs text-gray-400 mt-0.5">Only .csv files</p></div>
               }
               <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => handleFile(e.target.files[0])} />
             </div>
           </div>
 
-          {/* preview */}
           {csvRows.length > 0 && !result && (
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Preview ({csvRows.length} rows)</p>
@@ -262,7 +260,6 @@ function GeoBulkModal({ onClose, taluks, localBodies, onDone, toast }) {
             </div>
           )}
 
-          {/* result */}
           {result && (
             <div className={`rounded-xl p-4 ${result.failed === 0 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
               <p className={`font-semibold text-sm ${result.failed === 0 ? 'text-green-700' : 'text-amber-700'}`}>
@@ -278,14 +275,11 @@ function GeoBulkModal({ onClose, taluks, localBodies, onDone, toast }) {
           )}
         </div>
 
-        {/* footer */}
         <div className="flex gap-3 px-6 pb-5 pt-2 border-t border-gray-100 shrink-0">
           <button className="btn-secondary flex-1" onClick={onClose}>Close</button>
           {csvRows.length > 0 && !result && (
             <button onClick={handleUpload} disabled={uploading} className="btn-primary flex-1 justify-center">
-              {uploading
-                ? <><svg className="w-4 h-4 animate-spin mr-1" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Uploading…</>
-                : `Upload ${csvRows.length} ${cfg.label}`}
+              {uploading ? 'Uploading…' : `Upload ${csvRows.length} ${cfg.label}`}
             </button>
           )}
         </div>
@@ -338,45 +332,40 @@ function WbBulkModal({ onClose, talukNames, onDone, toast }) {
           <h3 className="font-heading font-bold text-lg text-gray-800">Bulk Upload — Water Bodies</h3>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400">✕</button>
         </div>
-
         <div className="overflow-y-auto px-6 py-4 space-y-4">
-          {/* field guide */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {[
-              { field: 'name', desc: 'Water body name (required)', required: true },
-              { field: 'wb_type', desc: `${WB_TYPES_LIST.join(' | ')}`, required: true },
-              { field: 'survey_number', desc: 'Revenue survey number e.g. 123/4A' },
-              { field: 'taluk_name', desc: `Taluk: ${talukNames.slice(0,3).join(', ')}…`, required: true },
-              { field: 'village', desc: 'Village or locality name' },
-              { field: 'area', desc: 'Area with unit e.g. 12.5 ha' },
-              { field: 'address', desc: 'Full address (optional)' },
-              { field: 'latitude', desc: 'GPS latitude e.g. 9.371234' },
-              { field: 'longitude', desc: 'GPS longitude e.g. 78.831234' },
-              { field: 'notes', desc: 'Additional notes (optional)' },
+              { field:'name', desc:'Water body name', required:true },
+              { field:'wb_type', desc:`${WB_TYPES_LIST.join(' | ')}`, required:true },
+              { field:'survey_number', desc:'Revenue survey no. e.g. 123/4A' },
+              { field:'taluk_name', desc:'Taluk name (must exist)', required:true },
+              { field:'village', desc:'Village or locality name' },
+              { field:'area', desc:'Area with unit e.g. 12.5 ha' },
+              { field:'address', desc:'Full address (optional)' },
+              { field:'latitude', desc:'GPS latitude e.g. 9.371234' },
+              { field:'longitude', desc:'GPS longitude e.g. 78.831234' },
+              { field:'notes', desc:'Additional notes (optional)' },
             ].map(({ field, desc, required }) => (
               <div key={field} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
                 <code className={`text-xs font-mono font-bold shrink-0 ${required ? 'text-accent' : 'text-gray-500'}`}>{field}</code>
                 {required && <span className="text-[10px] text-red-400 shrink-0 mt-0.5">*</span>}
-                <span className="text-xs text-gray-500 leading-relaxed">{desc}</span>
+                <span className="text-xs text-gray-500">{desc}</span>
               </div>
             ))}
           </div>
 
-          {/* step 1 */}
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between gap-4">
             <div>
               <p className="font-semibold text-blue-800 text-sm">Step 1 — Download Template</p>
               <p className="text-[11px] text-blue-500 font-mono mt-1">{WB_HEADERS.join('  |  ')}</p>
             </div>
-            <button
-              onClick={() => downloadCSV('water_bodies_template.csv', WB_HEADERS, WB_EXAMPLE)}
+            <button onClick={() => downloadCSV('water_bodies_template.csv', WB_HEADERS, WB_EXAMPLE)}
               className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               Download CSV
             </button>
           </div>
 
-          {/* step 2 */}
           <div>
             <p className="font-semibold text-gray-700 text-sm mb-2">Step 2 — Fill & Upload</p>
             <div className="border-2 border-dashed border-gray-200 rounded-xl p-5 flex flex-col items-center gap-2 hover:border-accent/50 hover:bg-accent/5 transition-colors cursor-pointer"
@@ -386,13 +375,12 @@ function WbBulkModal({ onClose, talukNames, onDone, toast }) {
               <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
               {csvFile
                 ? <div className="text-center"><p className="font-semibold text-accent text-sm">{csvFile.name}</p><p className="text-xs text-gray-400">{csvRows.length} water bodies ready</p></div>
-                : <div className="text-center"><p className="text-sm font-medium text-gray-600">Click to select or drag & drop CSV</p><p className="text-xs text-gray-400 mt-0.5">Only .csv files</p></div>
+                : <div className="text-center"><p className="text-sm font-medium text-gray-600">Click to select or drag & drop CSV</p></div>
               }
               <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => handleFile(e.target.files[0])} />
             </div>
           </div>
 
-          {/* preview */}
           {csvRows.length > 0 && !result && (
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Preview ({csvRows.length} rows)</p>
@@ -419,7 +407,6 @@ function WbBulkModal({ onClose, talukNames, onDone, toast }) {
             </div>
           )}
 
-          {/* result */}
           {result && (
             <div className={`rounded-xl p-4 ${result.failed === 0 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
               <p className={`font-semibold text-sm ${result.failed === 0 ? 'text-green-700' : 'text-amber-700'}`}>
@@ -427,21 +414,18 @@ function WbBulkModal({ onClose, talukNames, onDone, toast }) {
               </p>
               {result.errors.length > 0 && (
                 <ul className="mt-1 space-y-0.5">
-                  {result.errors.slice(0, 5).map((e, i) => <li key={i} className="text-xs text-red-600">• {e}</li>)}
-                  {result.errors.length > 5 && <li className="text-xs text-gray-400">…and {result.errors.length - 5} more</li>}
+                  {result.errors.slice(0,5).map((e,i) => <li key={i} className="text-xs text-red-600">• {e}</li>)}
+                  {result.errors.length > 5 && <li className="text-xs text-gray-400">…and {result.errors.length-5} more</li>}
                 </ul>
               )}
             </div>
           )}
         </div>
-
         <div className="flex gap-3 px-6 pb-5 pt-2 border-t border-gray-100 shrink-0">
           <button className="btn-secondary flex-1" onClick={onClose}>Close</button>
           {csvRows.length > 0 && !result && (
             <button onClick={handleUpload} disabled={uploading} className="btn-primary flex-1 justify-center">
-              {uploading
-                ? <><svg className="w-4 h-4 animate-spin mr-1" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Uploading…</>
-                : `Upload ${csvRows.length} Water Bodies`}
+              {uploading ? 'Uploading…' : `Upload ${csvRows.length} Water Bodies`}
             </button>
           )}
         </div>
@@ -450,7 +434,7 @@ function WbBulkModal({ onClose, talukNames, onDone, toast }) {
   )
 }
 
-// ── Location Picker map ───────────────────────────────────────────────────────
+// ── Location Picker ───────────────────────────────────────────────────────────
 function LocationPicker({ lat, lon, onChange }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
@@ -458,18 +442,18 @@ function LocationPicker({ lat, lon, onChange }) {
   useEffect(() => {
     if (mapRef.current) return
     const map = L.map(containerRef.current, { center: [9.371, 78.834], zoom: 10 })
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:18, attribution:'© OpenStreetMap' }).addTo(map)
     function placeMarker(lat, lng) {
       if (markerRef.current) markerRef.current.setLatLng([lat, lng])
       else {
         markerRef.current = L.marker([lat, lng], { draggable: true }).addTo(map)
-        markerRef.current.on('dragend', e => { const {lat,lng} = e.target.getLatLng(); onChange(lat.toFixed(6), lng.toFixed(6)) })
+        markerRef.current.on('dragend', e => { const {lat,lng}=e.target.getLatLng(); onChange(lat.toFixed(6), lng.toFixed(6)) })
       }
       onChange(lat.toFixed(6), lng.toFixed(6))
     }
     map.on('click', e => placeMarker(e.latlng.lat, e.latlng.lng))
     mapRef.current = map
-    return () => { map.remove(); mapRef.current = null; markerRef.current = null }
+    return () => { map.remove(); mapRef.current=null; markerRef.current=null }
   }, [])
   useEffect(() => {
     if (!mapRef.current || !lat || !lon) return
@@ -490,16 +474,15 @@ export default function MasterData() {
 
   const [openDivs, setOpenDivs] = useState({})
   const [openTaluks, setOpenTaluks] = useState({})
+  const [openBlocks, setOpenBlocks] = useState({})
   const [openPanchayats, setOpenPanchayats] = useState({})
 
   const [modal, setModal] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  // bulk upload modals
   const [showGeoBulk, setShowGeoBulk] = useState(false)
   const [showWbBulk, setShowWbBulk] = useState(false)
 
-  // register tab
   const [search, setSearch] = useState('')
   const [filterTaluk, setFilterTaluk] = useState('')
   const [taluks, setTaluks] = useState([])
@@ -507,7 +490,6 @@ export default function MasterData() {
   const [bodies, setBodies] = useState([])
   const [loadingBodies, setLoadingBodies] = useState(false)
 
-  // manual add water body
   const [showManual, setShowManual] = useState(false)
   const [manualForm, setManualForm] = useState({ name:'', wb_type:'Kanmai', taluk_name:'', village:'', area:'', survey_number:'', latitude:'', longitude:'', address:'', notes:'' })
   const [manualSaving, setManualSaving] = useState(false)
@@ -515,27 +497,24 @@ export default function MasterData() {
   const geocodeTimerRef = useRef(null)
 
   const refreshTaluks = useCallback(() => {
-    geo.taluks().then(d => setTaluks(Array.isArray(d) ? d : (d.results || []))).catch(() => {})
+    geo.taluks().then(d => setTaluks(Array.isArray(d) ? d : (d.results||[]))).catch(()=>{})
   }, [])
-
+  const refreshLocalBodies = useCallback(() => {
+    geo.localBodies().then(d => setLocalBodies(Array.isArray(d) ? d : (d.results||[]))).catch(()=>{})
+  }, [])
   const loadHierarchy = useCallback(() => {
     setHierLoading(true)
-    geo.hierarchy()
-      .then(d => {
-        setHierarchy(d)
-        const divs = {}
-        d.divisions?.forEach(div => { divs[div.name] = true })
-        setOpenDivs(divs)
-      })
-      .catch(() => {})
-      .finally(() => setHierLoading(false))
+    geo.hierarchy().then(d => {
+      setHierarchy(d)
+      const divs = {}
+      d.divisions?.forEach(div => { divs[div.name] = true })
+      setOpenDivs(divs)
+    }).catch(()=>{}).finally(()=>setHierLoading(false))
   }, [])
 
   useEffect(() => { loadHierarchy() }, [loadHierarchy])
   useEffect(() => { refreshTaluks() }, [refreshTaluks])
-  useEffect(() => {
-    geo.localBodies().then(d => setLocalBodies(Array.isArray(d) ? d : (d.results || []))).catch(() => {})
-  }, [])
+  useEffect(() => { refreshLocalBodies() }, [refreshLocalBodies])
 
   useEffect(() => {
     if (activeTab !== 'register') return
@@ -543,7 +522,7 @@ export default function MasterData() {
     const params = {}
     if (filterTaluk) params.taluk = filterTaluk
     if (search) params.search = search
-    wbApi.list(params).then(d => setBodies(Array.isArray(d) ? d : (d.results || []))).catch(() => {}).finally(() => setLoadingBodies(false))
+    wbApi.list(params).then(d => setBodies(Array.isArray(d) ? d : (d.results||[]))).catch(()=>{}).finally(()=>setLoadingBodies(false))
   }, [activeTab, filterTaluk, search])
 
   const talukNames = taluks.map(t => t.name)
@@ -551,42 +530,43 @@ export default function MasterData() {
   async function reverseGeocode(lat, lon) {
     setGeocoding(true)
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`, { headers: { 'Accept-Language': 'en' } })
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`, { headers:{'Accept-Language':'en'} })
       const data = await res.json()
-      setManualForm(f => ({ ...f, address: data.display_name || '' }))
-    } catch { } finally { setGeocoding(false) }
+      setManualForm(f => ({...f, address: data.display_name || ''}))
+    } catch {} finally { setGeocoding(false) }
   }
   function handleAddressType(value) {
-    setManualForm(f => ({ ...f, address: value }))
+    setManualForm(f => ({...f, address: value}))
     clearTimeout(geocodeTimerRef.current)
     if (!value.trim()) return
     geocodeTimerRef.current = setTimeout(async () => {
       setGeocoding(true)
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&limit=1`, { headers: { 'Accept-Language': 'en' } })
-        const [result] = await res.json()
-        if (result) setManualForm(f => ({ ...f, latitude: parseFloat(result.lat).toFixed(6), longitude: parseFloat(result.lon).toFixed(6) }))
-      } catch { } finally { setGeocoding(false) }
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&limit=1`, { headers:{'Accept-Language':'en'} })
+        const [r] = await res.json()
+        if (r) setManualForm(f => ({...f, latitude: parseFloat(r.lat).toFixed(6), longitude: parseFloat(r.lon).toFixed(6)}))
+      } catch {} finally { setGeocoding(false) }
     }, 800)
   }
 
-  // hierarchy CRUD
+  // ── hierarchy CRUD ─────────────────────────────────────────────────────────
   async function handleSave(vals) {
     setSaving(true)
     try {
       const { type, parentId, item } = modal
       const division = vals.division === '__new__' ? vals.new_division : vals.division
-      if (type === 'add-taluk') await geo.addTaluk({ district: 1, name: vals.name, division })
-      else if (type === 'edit-taluk') await geo.updateTaluk(item.id, { name: vals.name, division })
-      else if (type === 'add-panchayat') await geo.addLocalBody({ taluk: parentId, name: vals.name, lb_type: vals.lb_type })
-      else if (type === 'edit-panchayat') await geo.updateLocalBody(item.id, { name: vals.name, lb_type: vals.lb_type })
-      else if (type === 'add-village') await geo.addVillage({ panchayat: parentId, name: vals.name })
-      else if (type === 'edit-village') await geo.updateVillage(item.id, { name: vals.name })
+      if (type === 'add-taluk') await geo.addTaluk({ district:1, name:vals.name, division })
+      else if (type === 'edit-taluk') await geo.updateTaluk(item.id, { name:vals.name, division })
+      else if (type === 'add-block') await geo.addLocalBody({ taluk:parentId, name:vals.name, lb_type:'Block', parent:null })
+      else if (type === 'edit-block') await geo.updateLocalBody(item.id, { name:vals.name })
+      else if (type === 'add-panchayat') await geo.addLocalBody({ taluk:item.talukId, name:vals.name, lb_type:vals.lb_type, parent:parentId })
+      else if (type === 'edit-panchayat') await geo.updateLocalBody(item.id, { name:vals.name, lb_type:vals.lb_type })
+      else if (type === 'add-village') await geo.addVillage({ panchayat:parentId, name:vals.name })
+      else if (type === 'edit-village') await geo.updateVillage(item.id, { name:vals.name })
       toast('Saved!', 'success')
       setModal(null)
-      loadHierarchy(); refreshTaluks()
-      geo.localBodies().then(d => setLocalBodies(Array.isArray(d) ? d : (d.results || []))).catch(() => {})
-    } catch (err) { toast(err.message || 'Save failed', 'error') }
+      loadHierarchy(); refreshTaluks(); refreshLocalBodies()
+    } catch (err) { toast(err.message||'Save failed', 'error') }
     finally { setSaving(false) }
   }
 
@@ -594,58 +574,56 @@ export default function MasterData() {
     if (!confirm(`Delete "${item.name}"? This cannot be undone.`)) return
     try {
       if (type === 'taluk') await geo.deleteTaluk(item.id)
-      else if (type === 'panchayat') await geo.deleteLocalBody(item.id)
+      else if (type === 'block' || type === 'panchayat') await geo.deleteLocalBody(item.id)
       else if (type === 'village') await geo.deleteVillage(item.id)
       toast(`"${item.name}" deleted`, 'success')
-      loadHierarchy(); refreshTaluks()
-    } catch (err) { toast(err.message || 'Delete failed', 'error') }
+      loadHierarchy(); refreshTaluks(); refreshLocalBodies()
+    } catch (err) { toast(err.message||'Delete failed', 'error') }
   }
 
   function getModalConfig() {
     if (!modal) return null
     const { type, item } = modal
-    const existingDivisions = [...new Set(hierarchy?.divisions?.map(d => d.name) || [])]
-    if (type === 'add-taluk' || type === 'edit-taluk') {
-      return {
-        title: type === 'add-taluk' ? 'Add Taluk' : 'Edit Taluk',
-        fields: [
-          { key:'name', label:'Taluk Name', placeholder:'e.g. Rameswaram', autoFocus:true, default: item?.name || '' },
-          { key:'division', label:'Revenue Division', type:'select', default: item?.division || (existingDivisions[0] || ''),
-            options: [...existingDivisions.map(d => ({value:d, label:d})), { value:'__new__', label:'+ New division name' }] },
-          { key:'new_division', label:'New Division Name (if selected above)', placeholder:'e.g. New Division', default:'' },
-        ]
-      }
+    const existingDivisions = [...new Set(hierarchy?.divisions?.map(d => d.name)||[])]
+    if (type === 'add-taluk' || type === 'edit-taluk') return {
+      title: type === 'add-taluk' ? 'Add Taluk' : 'Edit Taluk',
+      fields: [
+        { key:'name', label:'Taluk Name', placeholder:'e.g. Rameswaram', autoFocus:true, default:item?.name||'' },
+        { key:'division', label:'Revenue Division', type:'select', default:item?.division||(existingDivisions[0]||''),
+          options:[...existingDivisions.map(d=>({value:d,label:d})),{value:'__new__',label:'+ New division'}] },
+        { key:'new_division', label:'New Division Name', placeholder:'e.g. New Division', default:'' },
+      ]
     }
-    if (type === 'add-panchayat' || type === 'edit-panchayat') {
-      return {
-        title: type === 'add-panchayat' ? 'Add Panchayat / Block' : 'Edit Panchayat / Block',
-        fields: [
-          { key:'name', label:'Panchayat / Block Name', placeholder:'e.g. Pamban Town Panchayat', autoFocus:true, default: item?.name || '' },
-          { key:'lb_type', label:'Type', type:'select', default: item?.type || 'Panchayat',
-            options: ['Municipality','Town Panchayat','Panchayat','Block'].map(o => ({value:o, label:o})) },
-        ]
-      }
+    if (type === 'add-block' || type === 'edit-block') return {
+      title: type === 'add-block' ? 'Add Block' : 'Edit Block',
+      fields: [{ key:'name', label:'Block Name', placeholder:'e.g. Rameswaram Block', autoFocus:true, default:item?.name||'' }]
     }
-    if (type === 'add-village' || type === 'edit-village') {
-      return {
-        title: type === 'add-village' ? 'Add Village' : 'Edit Village',
-        fields: [{ key:'name', label:'Village Name', placeholder:'e.g. Pamban', autoFocus:true, default: item?.name || '' }]
-      }
+    if (type === 'add-panchayat' || type === 'edit-panchayat') return {
+      title: type === 'add-panchayat' ? 'Add Panchayat' : 'Edit Panchayat',
+      fields: [
+        { key:'name', label:'Panchayat Name', placeholder:'e.g. Pamban Town Panchayat', autoFocus:true, default:item?.name||'' },
+        { key:'lb_type', label:'Type', type:'select', default:item?.type||'Panchayat',
+          options:['Municipality','Town Panchayat','Panchayat'].map(o=>({value:o,label:o})) },
+      ]
+    }
+    if (type === 'add-village' || type === 'edit-village') return {
+      title: type === 'add-village' ? 'Add Village' : 'Edit Village',
+      fields: [{ key:'name', label:'Village Name', placeholder:'e.g. Pamban', autoFocus:true, default:item?.name||'' }]
     }
     return null
   }
 
   async function handleManualAdd(e) {
     e.preventDefault()
-    if (!manualForm.name || !manualForm.taluk_name) { toast('Name and Taluk are required', 'error'); return }
+    if (!manualForm.name||!manualForm.taluk_name) { toast('Name and Taluk are required','error'); return }
     setManualSaving(true)
     try {
       await wbApi.create(manualForm)
       toast(`${manualForm.name} added!`, 'success')
       setShowManual(false)
       setManualForm({ name:'', wb_type:'Kanmai', taluk_name:'', village:'', area:'', survey_number:'', latitude:'', longitude:'', address:'', notes:'' })
-      if (activeTab === 'register') { const d = await wbApi.list({}); setBodies(Array.isArray(d) ? d : (d.results || [])) }
-    } catch (err) { toast(err.message || 'Failed to add', 'error') }
+      if (activeTab==='register') { const d=await wbApi.list({}); setBodies(Array.isArray(d)?d:(d.results||[])) }
+    } catch (err) { toast(err.message||'Failed','error') }
     finally { setManualSaving(false) }
   }
 
@@ -655,7 +633,7 @@ export default function MasterData() {
     <div className="animate-fade-in space-y-5">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <button className="btn-secondary" onClick={() => activeTab === 'hierarchy' ? setShowGeoBulk(true) : setShowWbBulk(true)}>
+        <button className="btn-secondary" onClick={() => activeTab==='hierarchy' ? setShowGeoBulk(true) : setShowWbBulk(true)}>
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
           Bulk Upload
         </button>
@@ -668,8 +646,8 @@ export default function MasterData() {
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
         {[{key:'hierarchy',label:'Geographic Hierarchy'},{key:'register',label:'Water Body Register'}].map(tab => (
-          <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+          <button key={tab.key} onClick={()=>setActiveTab(tab.key)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab===tab.key?'bg-white text-gray-900 shadow-sm':'text-gray-500 hover:text-gray-700'}`}>
             {tab.label}
           </button>
         ))}
@@ -681,12 +659,13 @@ export default function MasterData() {
           {/* Guide */}
           <div className="card p-5">
             <h3 className="font-heading font-bold text-gray-800 mb-4">Administrative Structure</h3>
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {[
                 { color:'bg-accent/10 text-accent border-accent/20', label:'District', desc:'Ramanathapuram' },
                 { color:'bg-blue-50 text-blue-700 border-blue-200', label:'Revenue Division', desc:'2 divisions' },
                 { color:'bg-teal-50 text-teal-700 border-teal-200', label:'Taluk', desc:'9 taluks' },
-                { color:'bg-orange-50 text-orange-700 border-orange-200', label:'Block / Panchayat', desc:'Local bodies' },
+                { color:'bg-purple-50 text-purple-700 border-purple-200', label:'Block', desc:'Panchayat Union Block' },
+                { color:'bg-orange-50 text-orange-700 border-orange-200', label:'Panchayat', desc:'Village Panchayat' },
                 { color:'bg-gray-50 text-gray-600 border-gray-200', label:'Village', desc:'Habitations' },
               ].map(({ color, label, desc }) => (
                 <div key={label} className={`flex items-center gap-3 px-3 py-2 rounded-lg border ${color}`}>
@@ -694,18 +673,17 @@ export default function MasterData() {
                 </div>
               ))}
             </div>
-            <div className="mt-5 pt-4 border-t border-gray-100 space-y-2">
+            <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
               <p className="text-xs font-semibold text-gray-500">How to manage:</p>
               <div className="bg-accent/5 border border-accent/15 rounded-xl px-3 py-3 space-y-1.5">
                 <p className="text-xs text-gray-600"><span className="text-accent font-bold">+</span> Hover row → green + to add child</p>
-                <p className="text-xs text-gray-600"><span className="text-blue-500">✎</span> Hover row → pencil to edit</p>
+                <p className="text-xs text-gray-600"><span className="text-blue-500">✎</span> Hover row → pencil to edit name</p>
                 <p className="text-xs text-gray-600"><span className="text-red-400">🗑</span> Hover row → trash to delete</p>
-                <p className="text-xs text-gray-600">▶ Click row to expand/collapse</p>
               </div>
               <button onClick={() => setShowGeoBulk(true)}
-                className="w-full mt-2 flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-dashed border-accent/40 text-accent text-xs font-semibold hover:bg-accent/5 transition-colors">
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-dashed border-accent/40 text-accent text-xs font-semibold hover:bg-accent/5 transition-colors">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                Bulk Upload Taluks / Panchayats / Villages
+                Bulk Upload Hierarchy
               </button>
             </div>
           </div>
@@ -714,7 +692,7 @@ export default function MasterData() {
           <div className="card p-5 lg:col-span-2">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-heading font-bold text-gray-800">Hierarchy Tree</h3>
-              <button onClick={() => setModal({ type:'add-taluk' })}
+              <button onClick={() => setModal({type:'add-taluk'})}
                 className="flex items-center gap-1.5 text-xs font-semibold text-accent border border-accent/30 bg-accent/5 hover:bg-accent/10 px-3 py-1.5 rounded-lg transition-colors">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 4v16m8-8H4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
                 Add Taluk
@@ -725,22 +703,22 @@ export default function MasterData() {
 
             {!hierLoading && hierarchy && (
               <div className="space-y-1 select-none">
+                {/* District */}
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/5 border border-accent/15 mb-3">
                   <svg className="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-                  <span className="font-bold text-accent text-sm">{hierarchy.district || 'Ramanathapuram'} District</span>
+                  <span className="font-bold text-accent text-sm">{hierarchy.district||'Ramanathapuram'} District</span>
                 </div>
 
-                {(!hierarchy.divisions || hierarchy.divisions.length === 0) && (
-                  <div className="py-6 text-center text-gray-400 text-sm">
-                    No taluks yet. Click <strong className="text-accent">+ Add Taluk</strong> above.
-                  </div>
+                {(!hierarchy.divisions||hierarchy.divisions.length===0) && (
+                  <div className="py-6 text-center text-gray-400 text-sm">No taluks yet. Click <strong className="text-accent">+ Add Taluk</strong>.</div>
                 )}
 
                 {hierarchy.divisions?.map(div => (
                   <div key={div.name} className="mb-1">
+                    {/* Division */}
                     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50/70 mb-1 cursor-pointer"
-                      onClick={() => setOpenDivs(p => ({ ...p, [div.name]: !p[div.name] }))}>
-                      <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${openDivs[div.name] ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+                      onClick={() => setOpenDivs(p=>({...p,[div.name]:!p[div.name]}))}>
+                      <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${openDivs[div.name]?'rotate-90':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
                       <svg className="w-4 h-4 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
                       <span className="font-semibold text-blue-800 text-sm flex-1">{div.name}</span>
                       <span className="text-xs text-blue-400 bg-blue-100 px-2 py-0.5 rounded-full">{div.taluks?.length} taluks</span>
@@ -750,55 +728,89 @@ export default function MasterData() {
                       <div className="ml-5 border-l-2 border-blue-100 pl-3 space-y-0.5 mb-2">
                         {div.taluks?.map(taluk => (
                           <div key={taluk.id}>
+                            {/* Taluk */}
                             <div className="group flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-teal-50 transition-colors">
-                              <button onClick={() => setOpenTaluks(p => ({...p, [taluk.id]: !p[taluk.id]}))}
+                              <button onClick={() => setOpenTaluks(p=>({...p,[taluk.id]:!p[taluk.id]}))}
                                 className="flex items-center gap-2 flex-1 text-left min-w-0">
-                                <svg className={`w-3 h-3 text-gray-400 transition-transform shrink-0 ${openTaluks[taluk.id] ? 'rotate-90':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+                                <svg className={`w-3 h-3 text-gray-400 transition-transform shrink-0 ${openTaluks[taluk.id]?'rotate-90':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
                                 <svg className="w-3.5 h-3.5 text-teal-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                                 <span className="font-medium text-gray-700 text-sm truncate">{taluk.name} Taluk</span>
-                                {taluk.wb_count > 0 && <span className="text-xs text-accent font-semibold bg-accent/10 px-1.5 py-0.5 rounded-full shrink-0">{taluk.wb_count} WB</span>}
+                                {taluk.wb_count>0 && <span className="text-xs text-accent font-semibold bg-accent/10 px-1.5 py-0.5 rounded-full shrink-0">{taluk.wb_count} WB</span>}
                               </button>
                               <div className="flex items-center gap-1 shrink-0">
-                                <PlusBtn title="Add Panchayat" onClick={e => { e.stopPropagation(); setModal({type:'add-panchayat', parentId:taluk.id}) }} />
-                                <EditBtn onClick={e => { e.stopPropagation(); setModal({type:'edit-taluk', item:{id:taluk.id, name:taluk.name, division:div.name}}) }} />
-                                <DelBtn onClick={e => { e.stopPropagation(); handleDelete('taluk', taluk) }} />
+                                <PlusBtn title="Add Block" onClick={e=>{e.stopPropagation();setModal({type:'add-block',parentId:taluk.id})}} />
+                                <EditBtn onClick={e=>{e.stopPropagation();setModal({type:'edit-taluk',item:{id:taluk.id,name:taluk.name,division:div.name}})}} />
+                                <DelBtn onClick={e=>{e.stopPropagation();handleDelete('taluk',taluk)}} />
                               </div>
                             </div>
 
                             {openTaluks[taluk.id] && (
                               <div className="ml-5 border-l-2 border-teal-100 pl-3 space-y-0.5 mt-1 mb-1">
-                                {taluk.panchayats?.length === 0 && (
-                                  <div className="px-3 py-1.5 text-xs text-gray-400 italic">
-                                    No panchayats.{' '}
-                                    <button onClick={() => setModal({type:'add-panchayat', parentId:taluk.id})} className="text-accent font-semibold hover:underline">+ Add</button>
-                                  </div>
+                                {/* standalone panchayats (no block) */}
+                                {taluk.panchayats?.length > 0 && (
+                                  <div className="px-3 py-1 text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Direct Panchayats</div>
                                 )}
                                 {taluk.panchayats?.map(p => (
-                                  <div key={p.id}>
-                                    <div className="group flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-orange-50 transition-colors">
-                                      <button onClick={() => setOpenPanchayats(prev => ({...prev, [p.id]: !prev[p.id]}))}
+                                  <PanchayatRow key={p.id} p={p} open={openPanchayats} setOpen={setOpenPanchayats}
+                                    onAddVillage={()=>setModal({type:'add-village',parentId:p.id})}
+                                    onEdit={()=>setModal({type:'edit-panchayat',item:{id:p.id,name:p.name,type:p.type}})}
+                                    onDelete={()=>handleDelete('panchayat',p)}
+                                    onEditVillage={v=>setModal({type:'edit-village',item:{id:v.id,name:v.name}})}
+                                    onDeleteVillage={v=>handleDelete('village',v)}
+                                  />
+                                ))}
+
+                                {/* blocks */}
+                                {taluk.blocks?.length === 0 && taluk.panchayats?.length === 0 && (
+                                  <div className="px-3 py-1.5 text-xs text-gray-400 italic">
+                                    No blocks yet.{' '}
+                                    <button onClick={()=>setModal({type:'add-block',parentId:taluk.id})} className="text-accent font-semibold hover:underline">+ Add Block</button>
+                                  </div>
+                                )}
+                                {taluk.blocks?.map(block => (
+                                  <div key={block.id}>
+                                    {/* Block row */}
+                                    <div className="group flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-purple-50 transition-colors">
+                                      <button onClick={()=>setOpenBlocks(p=>({...p,[block.id]:!p[block.id]}))}
                                         className="flex items-center gap-2 flex-1 text-left min-w-0">
-                                        <svg className={`w-2.5 h-2.5 text-gray-300 transition-transform shrink-0 ${openPanchayats[p.id]?'rotate-90':''} ${p.villages?.length===0?'opacity-0 pointer-events-none':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
-                                        <svg className="w-3.5 h-3.5 text-orange-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-                                        <span className="text-sm text-gray-600 truncate">{p.name}</span>
-                                        <span className="ml-1 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full shrink-0">{p.type}</span>
-                                        {p.villages?.length > 0 && <span className="text-[10px] text-gray-400 shrink-0">{p.villages.length}v</span>}
+                                        <svg className={`w-2.5 h-2.5 text-gray-400 transition-transform shrink-0 ${openBlocks[block.id]?'rotate-90':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+                                        <svg className="w-3.5 h-3.5 text-purple-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                                        <span className="font-medium text-purple-800 text-sm truncate">{block.name}</span>
+                                        <span className="text-[10px] text-purple-400 bg-purple-100 px-1.5 py-0.5 rounded-full shrink-0">Block</span>
+                                        {block.panchayats?.length > 0 && <span className="text-[10px] text-gray-400 shrink-0">{block.panchayats.length}p</span>}
                                       </button>
                                       <div className="flex items-center gap-1 shrink-0">
-                                        <PlusBtn title="Add Village" onClick={e => { e.stopPropagation(); setModal({type:'add-village', parentId:p.id}) }} />
-                                        <EditBtn onClick={e => { e.stopPropagation(); setModal({type:'edit-panchayat', item:{id:p.id, name:p.name, type:p.type}}) }} />
-                                        <DelBtn onClick={e => { e.stopPropagation(); handleDelete('panchayat', p) }} />
+                                        <PlusBtn title="Add Panchayat" onClick={e=>{e.stopPropagation();setModal({type:'add-panchayat',parentId:block.id,item:{talukId:taluk.id}})}} />
+                                        <EditBtn onClick={e=>{e.stopPropagation();setModal({type:'edit-block',item:{id:block.id,name:block.name}})}} />
+                                        <DelBtn onClick={e=>{e.stopPropagation();handleDelete('block',block)}} />
                                       </div>
                                     </div>
-                                    {openPanchayats[p.id] && p.villages?.length > 0 && (
-                                      <div className="ml-6 border-l-2 border-orange-100 pl-3 mt-0.5 mb-1 space-y-0.5">
-                                        {p.villages.map(v => (
-                                          <div key={v.id} className="group flex items-center gap-2 px-3 py-1 rounded-lg hover:bg-gray-50 transition-colors">
+
+                                    {openBlocks[block.id] && (
+                                      <div className="ml-5 border-l-2 border-purple-100 pl-3 space-y-0.5 mt-0.5 mb-1">
+                                        {block.panchayats?.length === 0 && (
+                                          <div className="px-3 py-1 text-xs text-gray-400 italic">
+                                            No panchayats.{' '}
+                                            <button onClick={()=>setModal({type:'add-panchayat',parentId:block.id,item:{talukId:taluk.id}})} className="text-accent font-semibold hover:underline">+ Add</button>
+                                          </div>
+                                        )}
+                                        {block.panchayats?.map(p => (
+                                          <PanchayatRow key={p.id} p={p} open={openPanchayats} setOpen={setOpenPanchayats}
+                                            onAddVillage={()=>setModal({type:'add-village',parentId:p.id})}
+                                            onEdit={()=>setModal({type:'edit-panchayat',item:{id:p.id,name:p.name,type:p.type}})}
+                                            onDelete={()=>handleDelete('panchayat',p)}
+                                            onEditVillage={v=>setModal({type:'edit-village',item:{id:v.id,name:v.name}})}
+                                            onDeleteVillage={v=>handleDelete('village',v)}
+                                          />
+                                        ))}
+                                        {/* direct villages under block */}
+                                        {block.villages?.map(v => (
+                                          <div key={v.id} className="group flex items-center gap-2 px-3 py-1 rounded-lg hover:bg-gray-50 ml-2">
                                             <div className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0"/>
                                             <span className="text-xs text-gray-500 flex-1">{v.name}</span>
-                                            <div className="flex items-center gap-1 shrink-0">
-                                              <EditBtn onClick={e => { e.stopPropagation(); setModal({type:'edit-village', item:{id:v.id, name:v.name}}) }} />
-                                              <DelBtn onClick={e => { e.stopPropagation(); handleDelete('village', v) }} />
+                                            <div className="flex gap-1 shrink-0">
+                                              <EditBtn onClick={e=>{e.stopPropagation();setModal({type:'edit-village',item:{id:v.id,name:v.name}})}} />
+                                              <DelBtn onClick={e=>{e.stopPropagation();handleDelete('village',v)}} />
                                             </div>
                                           </div>
                                         ))}
@@ -824,12 +836,12 @@ export default function MasterData() {
       {activeTab === 'register' && (
         <div className="space-y-4">
           <div className="card p-4 flex flex-wrap gap-3">
-            <input type="text" placeholder="Search by name or village…" value={search} onChange={e => setSearch(e.target.value)} className="input flex-1 min-w-48" />
-            <select className="input w-auto" value={filterTaluk} onChange={e => setFilterTaluk(e.target.value)}>
+            <input type="text" placeholder="Search by name or village…" value={search} onChange={e=>setSearch(e.target.value)} className="input flex-1 min-w-48" />
+            <select className="input w-auto" value={filterTaluk} onChange={e=>setFilterTaluk(e.target.value)}>
               <option value="">All Taluks</option>
-              {talukNames.map(t => <option key={t}>{t}</option>)}
+              {talukNames.map(t=><option key={t}>{t}</option>)}
             </select>
-            {(search || filterTaluk) && <button className="btn-secondary" onClick={() => { setSearch(''); setFilterTaluk('') }}>Clear</button>}
+            {(search||filterTaluk) && <button className="btn-secondary" onClick={()=>{setSearch('');setFilterTaluk('')}}>Clear</button>}
           </div>
           <div className="card p-0 overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
@@ -839,22 +851,21 @@ export default function MasterData() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
-                  <tr>{['Survey No.','Name','Type','Taluk','Village','Area','Status'].map(h =>
-                    <th key={h} className="table-head px-4 py-3 text-left">{h}</th>)}</tr>
+                  <tr>{['Survey No.','Name','Type','Taluk','Village','Area','Status'].map(h=><th key={h} className="table-head px-4 py-3 text-left">{h}</th>)}</tr>
                 </thead>
                 <tbody>
                   {loadingBodies && <tr><td colSpan={7} className="text-center py-8 text-gray-400">Loading…</td></tr>}
-                  {!loadingBodies && bodies.length === 0 && (
+                  {!loadingBodies && bodies.length===0 && (
                     <tr><td colSpan={7} className="text-center py-12 text-gray-400">
                       No records.{' '}
-                      <button onClick={() => setShowManual(true)} className="text-accent font-semibold hover:underline">+ Add one</button>
+                      <button onClick={()=>setShowManual(true)} className="text-accent font-semibold hover:underline">+ Add one</button>
                       {' '}or{' '}
-                      <button onClick={() => setShowWbBulk(true)} className="text-accent font-semibold hover:underline">Bulk Upload</button>
+                      <button onClick={()=>setShowWbBulk(true)} className="text-accent font-semibold hover:underline">Bulk Upload</button>
                     </td></tr>
                   )}
-                  {bodies.map(b => (
+                  {bodies.map(b=>(
                     <tr key={b.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="px-4 py-3 text-gray-700 font-medium text-sm">{b.survey_number || '—'}</td>
+                      <td className="px-4 py-3 text-gray-700 font-medium text-sm">{b.survey_number||'—'}</td>
                       <td className="px-4 py-3 font-medium text-gray-800">{b.name}</td>
                       <td className="px-4 py-3 text-gray-600">{b.wb_type}</td>
                       <td className="px-4 py-3 text-gray-600">{b.taluk_name}</td>
@@ -870,107 +881,119 @@ export default function MasterData() {
         </div>
       )}
 
-      {/* ── Hierarchy CRUD mini-modal ─────────────────────────────────────── */}
-      {modal && modalCfg && (
-        <MiniModal title={modalCfg.title} fields={modalCfg.fields} saving={saving} onSave={handleSave} onClose={() => setModal(null)} />
-      )}
+      {/* modals */}
+      {modal && modalCfg && <MiniModal title={modalCfg.title} fields={modalCfg.fields} saving={saving} onSave={handleSave} onClose={()=>setModal(null)} />}
 
-      {/* ── Geo Bulk Upload Modal ─────────────────────────────────────────── */}
-      {showGeoBulk && (
-        <GeoBulkModal
-          onClose={() => setShowGeoBulk(false)}
-          taluks={taluks}
-          localBodies={localBodies}
-          toast={toast}
-          onDone={() => { loadHierarchy(); refreshTaluks() }}
-        />
-      )}
+      {showGeoBulk && <GeoBulkModal onClose={()=>setShowGeoBulk(false)} taluks={taluks} localBodies={localBodies} toast={toast} onDone={()=>{loadHierarchy();refreshTaluks();refreshLocalBodies()}} />}
 
-      {/* ── Water Body Bulk Upload Modal ──────────────────────────────────── */}
-      {showWbBulk && (
-        <WbBulkModal
-          onClose={() => setShowWbBulk(false)}
-          talukNames={talukNames}
-          toast={toast}
-          onDone={async () => { const d = await wbApi.list({}); setBodies(Array.isArray(d) ? d : (d.results || [])) }}
-        />
-      )}
+      {showWbBulk && <WbBulkModal onClose={()=>setShowWbBulk(false)} talukNames={talukNames} toast={toast} onDone={async()=>{const d=await wbApi.list({});setBodies(Array.isArray(d)?d:(d.results||[]))}} />}
 
-      {/* ── Add Water Body Manual Modal ───────────────────────────────────── */}
+      {/* Add Water Body Modal */}
       {showManual && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setShowManual(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={()=>setShowManual(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100 shrink-0">
               <h3 className="font-heading font-bold text-lg text-gray-800">Add Water Body</h3>
-              <button onClick={() => setShowManual(false)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500">✕</button>
+              <button onClick={()=>setShowManual(false)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500">✕</button>
             </div>
             <form onSubmit={handleManualAdd} className="overflow-y-auto px-6 py-4 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="sm:col-span-2">
                   <label className="label">Water Body Name *</label>
-                  <input className="input" placeholder="e.g. Ramaneri Kanmai" autoFocus required
-                    value={manualForm.name} onChange={e => setManualForm(f => ({...f, name:e.target.value}))} />
+                  <input className="input" placeholder="e.g. Ramaneri Kanmai" autoFocus required value={manualForm.name} onChange={e=>setManualForm(f=>({...f,name:e.target.value}))} />
                 </div>
                 <div>
                   <label className="label">Type</label>
-                  <select className="input" value={manualForm.wb_type} onChange={e => setManualForm(f => ({...f, wb_type:e.target.value}))}>
-                    {WB_TYPES_LIST.map(t => <option key={t}>{t}</option>)}
+                  <select className="input" value={manualForm.wb_type} onChange={e=>setManualForm(f=>({...f,wb_type:e.target.value}))}>
+                    {WB_TYPES_LIST.map(t=><option key={t}>{t}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="label">Taluk *</label>
-                  <select className="input" required value={manualForm.taluk_name} onChange={e => setManualForm(f => ({...f, taluk_name:e.target.value}))}>
+                  <select className="input" required value={manualForm.taluk_name} onChange={e=>setManualForm(f=>({...f,taluk_name:e.target.value}))}>
                     <option value="">Select Taluk</option>
-                    {talukNames.map(t => <option key={t}>{t}</option>)}
+                    {talukNames.map(t=><option key={t}>{t}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="label">Village</label>
-                  <input className="input" placeholder="Village name" value={manualForm.village} onChange={e => setManualForm(f => ({...f, village:e.target.value}))} />
+                  <input className="input" placeholder="Village name" value={manualForm.village} onChange={e=>setManualForm(f=>({...f,village:e.target.value}))} />
                 </div>
                 <div>
                   <label className="label">Area</label>
-                  <input className="input" placeholder="e.g. 12.5 ha" value={manualForm.area} onChange={e => setManualForm(f => ({...f, area:e.target.value}))} />
+                  <input className="input" placeholder="e.g. 12.5 ha" value={manualForm.area} onChange={e=>setManualForm(f=>({...f,area:e.target.value}))} />
                 </div>
                 <div className="sm:col-span-2">
                   <label className="label">Survey Number</label>
-                  <input className="input" placeholder="e.g. 123/4A" value={manualForm.survey_number} onChange={e => setManualForm(f => ({...f, survey_number:e.target.value}))} />
+                  <input className="input" placeholder="e.g. 123/4A" value={manualForm.survey_number} onChange={e=>setManualForm(f=>({...f,survey_number:e.target.value}))} />
                 </div>
                 <div className="sm:col-span-2 space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="label mb-0">Location on Map</label>
                     <button type="button" className="text-xs font-semibold text-accent flex items-center gap-1 px-2.5 py-1 rounded-lg border border-accent/30 bg-accent/5 hover:bg-accent/10 transition-all"
-                      onClick={() => { navigator.geolocation?.getCurrentPosition(pos => { const lat = pos.coords.latitude.toFixed(6); const lon = pos.coords.longitude.toFixed(6); setManualForm(f => ({...f, latitude:lat, longitude:lon})); reverseGeocode(lat, lon) }) }}>
+                      onClick={()=>{navigator.geolocation?.getCurrentPosition(pos=>{const lat=pos.coords.latitude.toFixed(6);const lon=pos.coords.longitude.toFixed(6);setManualForm(f=>({...f,latitude:lat,longitude:lon}));reverseGeocode(lat,lon)})}}>
                       Use my GPS
                     </button>
                   </div>
-                  <LocationPicker lat={manualForm.latitude} lon={manualForm.longitude}
-                    onChange={(lat, lon) => { setManualForm(f => ({...f, latitude:lat, longitude:lon})); reverseGeocode(lat, lon) }} />
+                  <LocationPicker lat={manualForm.latitude} lon={manualForm.longitude} onChange={(lat,lon)=>{setManualForm(f=>({...f,latitude:lat,longitude:lon}));reverseGeocode(lat,lon)}} />
                   {manualForm.latitude && manualForm.longitude && (
-                    <div className="text-xs font-mono text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">
-                      {manualForm.latitude}°N, {manualForm.longitude}°E
-                    </div>
+                    <div className="text-xs font-mono text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">{manualForm.latitude}°N, {manualForm.longitude}°E</div>
                   )}
                   <div>
                     <label className="label">Address</label>
                     <div className="relative">
-                      <input className="input pr-8" placeholder="Type or auto-filled from map pin"
-                        value={manualForm.address} onChange={e => handleAddressType(e.target.value)} />
+                      <input className="input pr-8" placeholder="Type or auto-filled from map pin" value={manualForm.address} onChange={e=>handleAddressType(e.target.value)} />
                       {geocoding && <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
                     </div>
                   </div>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="label">Notes</label>
-                  <textarea className="input min-h-16 resize-y" value={manualForm.notes} onChange={e => setManualForm(f => ({...f, notes:e.target.value}))} />
+                  <textarea className="input min-h-16 resize-y" value={manualForm.notes} onChange={e=>setManualForm(f=>({...f,notes:e.target.value}))} />
                 </div>
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" className="btn-secondary flex-1" onClick={() => setShowManual(false)}>Cancel</button>
-                <button type="submit" className="btn-primary flex-1 justify-center" disabled={manualSaving}>{manualSaving ? 'Saving…' : 'Add Water Body'}</button>
+                <button type="button" className="btn-secondary flex-1" onClick={()=>setShowManual(false)}>Cancel</button>
+                <button type="submit" className="btn-primary flex-1 justify-center" disabled={manualSaving}>{manualSaving?'Saving…':'Add Water Body'}</button>
               </div>
             </form>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Panchayat row (reusable for both block-level and standalone) ──────────────
+function PanchayatRow({ p, open, setOpen, onAddVillage, onEdit, onDelete, onEditVillage, onDeleteVillage }) {
+  return (
+    <div>
+      <div className="group flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-orange-50 transition-colors">
+        <button onClick={()=>setOpen(prev=>({...prev,[p.id]:!prev[p.id]}))} className="flex items-center gap-2 flex-1 text-left min-w-0">
+          <svg className={`w-2.5 h-2.5 text-gray-300 transition-transform shrink-0 ${open[p.id]?'rotate-90':''} ${p.villages?.length===0?'opacity-0 pointer-events-none':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+          <svg className="w-3.5 h-3.5 text-orange-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+          <span className="text-sm text-gray-600 truncate">{p.name}</span>
+          <span className="ml-1 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full shrink-0">{p.type}</span>
+          {p.villages?.length>0 && <span className="text-[10px] text-gray-400 shrink-0">{p.villages.length}v</span>}
+        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <PlusBtn title="Add Village" onClick={e=>{e.stopPropagation();onAddVillage()}} />
+          <EditBtn onClick={e=>{e.stopPropagation();onEdit()}} />
+          <DelBtn onClick={e=>{e.stopPropagation();onDelete()}} />
+        </div>
+      </div>
+      {open[p.id] && p.villages?.length>0 && (
+        <div className="ml-6 border-l-2 border-orange-100 pl-3 mt-0.5 mb-1 space-y-0.5">
+          {p.villages.map(v=>(
+            <div key={v.id} className="group flex items-center gap-2 px-3 py-1 rounded-lg hover:bg-gray-50 transition-colors">
+              <div className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0"/>
+              <span className="text-xs text-gray-500 flex-1">{v.name}</span>
+              <div className="flex gap-1 shrink-0">
+                <EditBtn onClick={e=>{e.stopPropagation();onEditVillage(v)}} />
+                <DelBtn onClick={e=>{e.stopPropagation();onDeleteVillage(v)}} />
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
