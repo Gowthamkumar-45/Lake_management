@@ -48,7 +48,7 @@ class WaterBodyListSerializer(serializers.ModelSerializer):
         model = WaterBody
         fields = [
             'id', 'wb_id', 'name', 'wb_type', 'taluk', 'taluk_name',
-            'village', 'status', 'water_level', 'area',
+            'village', 'status', 'water_level', 'area', 'survey_number', 'address',
             'last_inspection', 'next_inspection', 'work_status', 'reno_status',
             'latitude', 'longitude',
         ]
