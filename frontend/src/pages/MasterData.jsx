@@ -5,7 +5,7 @@ import { geo, waterBodies as wbApi } from '../services/api.js'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-// ── small action buttons ──────────────────────────────────────────────────────
+// ── action icon buttons ───────────────────────────────────────────────────────
 function PlusBtn({ onClick, title }) {
   return (
     <button onClick={onClick} title={title}
@@ -31,7 +31,7 @@ function DelBtn({ onClick }) {
   )
 }
 
-// ── mini modal for CRUD ───────────────────────────────────────────────────────
+// ── mini modal for hierarchy CRUD ─────────────────────────────────────────────
 function MiniModal({ title, fields, onSave, onClose, saving }) {
   const [vals, setVals] = useState(() => {
     const obj = {}; fields.forEach(f => { obj[f.key] = f.default || '' }); return obj
@@ -67,7 +67,390 @@ function MiniModal({ title, fields, onSave, onClose, saving }) {
   )
 }
 
-// ── location picker map ───────────────────────────────────────────────────────
+// ── CSV helper ────────────────────────────────────────────────────────────────
+function makeCSV(headers, rows) {
+  return [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+}
+function downloadCSV(filename, headers, rows) {
+  const blob = new Blob([makeCSV(headers, rows)], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+function parseCSV(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  if (lines.length < 2) return []
+  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim())
+  return lines.slice(1).map(line => {
+    const vals = line.split(',').map(v => v.replace(/"/g, '').trim())
+    const obj = {}; headers.forEach((h, i) => { obj[h] = vals[i] || '' }); return obj
+  })
+}
+
+// ── Hierarchy Bulk Upload Modal ───────────────────────────────────────────────
+const GEO_TABS = [
+  {
+    key: 'taluk',
+    label: 'Taluks',
+    color: 'text-blue-700',
+    bg: 'bg-blue-50',
+    border: 'border-blue-200',
+    headers: ['taluk_name', 'division'],
+    example: [
+      ['Rameswaram', 'Ramanathapuram Division'],
+      ['Kamuthi', 'Paramakudi Division'],
+      ['Mudukulathur', 'Paramakudi Division'],
+    ],
+    note: 'division must match exactly: "Ramanathapuram Division" or "Paramakudi Division"',
+  },
+  {
+    key: 'panchayat',
+    label: 'Panchayats / Blocks',
+    color: 'text-orange-700',
+    bg: 'bg-orange-50',
+    border: 'border-orange-200',
+    headers: ['taluk_name', 'panchayat_name', 'type'],
+    example: [
+      ['Rameswaram', 'Pamban Town Panchayat', 'Town Panchayat'],
+      ['Rameswaram', 'Mandapam Town Panchayat', 'Town Panchayat'],
+      ['Kamuthi', 'Abiramam Panchayat', 'Panchayat'],
+    ],
+    note: 'type options: Municipality | Town Panchayat | Panchayat | Block',
+  },
+  {
+    key: 'village',
+    label: 'Villages',
+    color: 'text-gray-700',
+    bg: 'bg-gray-50',
+    border: 'border-gray-200',
+    headers: ['taluk_name', 'panchayat_name', 'village_name'],
+    example: [
+      ['Rameswaram', 'Pamban Town Panchayat', 'Pamban'],
+      ['Rameswaram', 'Pamban Town Panchayat', 'Uchipuli South'],
+      ['Kamuthi', 'Abiramam Panchayat', 'Siruthoppu'],
+    ],
+    note: 'taluk_name and panchayat_name must already exist in the system',
+  },
+]
+
+function GeoBulkModal({ onClose, taluks, localBodies, onDone, toast }) {
+  const [geoTab, setGeoTab] = useState('taluk')
+  const [csvFile, setCsvFile] = useState(null)
+  const [csvRows, setCsvRows] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [result, setResult] = useState(null)
+  const fileRef = useRef(null)
+
+  const cfg = GEO_TABS.find(t => t.key === geoTab)
+
+  function switchTab(key) { setGeoTab(key); setCsvFile(null); setCsvRows([]); setResult(null) }
+
+  function handleFile(file) {
+    if (!file) return
+    setCsvFile(file); setResult(null)
+    const reader = new FileReader()
+    reader.onload = e => setCsvRows(parseCSV(e.target.result))
+    reader.readAsText(file)
+  }
+
+  async function handleUpload() {
+    if (!csvRows.length) return
+    setUploading(true); setResult(null)
+    let success = 0, failed = 0, errors = []
+
+    for (const row of csvRows) {
+      try {
+        if (geoTab === 'taluk') {
+          const district_id = 1
+          await geo.addTaluk({ district: district_id, name: row.taluk_name, division: row.division })
+        } else if (geoTab === 'panchayat') {
+          const taluk = taluks.find(t => t.name.toLowerCase() === row.taluk_name.toLowerCase())
+          if (!taluk) throw new Error(`Taluk "${row.taluk_name}" not found`)
+          await geo.addLocalBody({ taluk: taluk.id, name: row.panchayat_name, lb_type: row.type || 'Panchayat' })
+        } else if (geoTab === 'village') {
+          const allBodies = localBodies.length ? localBodies : await geo.localBodies()
+          const body = (Array.isArray(allBodies) ? allBodies : allBodies.results || [])
+            .find(b => b.name.toLowerCase() === row.panchayat_name.toLowerCase())
+          if (!body) throw new Error(`Panchayat "${row.panchayat_name}" not found`)
+          await geo.addVillage({ panchayat: body.id, name: row.village_name })
+        }
+        success++
+      } catch (err) {
+        failed++
+        errors.push(`${row.taluk_name || row.panchayat_name || row.village_name || '?'}: ${err.message}`)
+      }
+    }
+
+    setResult({ success, failed, errors })
+    setUploading(false)
+    if (success > 0) { toast(`${success} records added!`, 'success'); onDone() }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+        {/* header */}
+        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 shrink-0">
+          <h3 className="font-heading font-bold text-lg text-gray-800">Bulk Upload — Geographic Hierarchy</h3>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400">✕</button>
+        </div>
+
+        {/* level tabs */}
+        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 mx-6 mt-4 shrink-0">
+          {GEO_TABS.map(t => (
+            <button key={t.key} onClick={() => switchTab(t.key)}
+              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${geoTab === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="overflow-y-auto px-6 py-4 space-y-4">
+          {/* note */}
+          <div className={`rounded-xl px-4 py-2.5 border text-xs ${cfg.bg} ${cfg.border} ${cfg.color}`}>
+            <span className="font-semibold">Note: </span>{cfg.note}
+          </div>
+
+          {/* step 1 — download */}
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-blue-800 text-sm">Step 1 — Download Template</p>
+              <p className="text-[11px] text-blue-500 font-mono mt-1">Columns: {cfg.headers.join('  |  ')}</p>
+            </div>
+            <button
+              onClick={() => downloadCSV(`${geoTab}_template.csv`, cfg.headers, cfg.example)}
+              className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              Download CSV
+            </button>
+          </div>
+
+          {/* step 2 — upload */}
+          <div>
+            <p className="font-semibold text-gray-700 text-sm mb-2">Step 2 — Fill & Upload</p>
+            <div className="border-2 border-dashed border-gray-200 rounded-xl p-5 flex flex-col items-center gap-2 hover:border-accent/50 hover:bg-accent/5 transition-colors cursor-pointer"
+              onClick={() => fileRef.current?.click()}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }}>
+              <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              {csvFile
+                ? <div className="text-center"><p className="font-semibold text-accent text-sm">{csvFile.name}</p><p className="text-xs text-gray-400">{csvRows.length} rows ready to upload</p></div>
+                : <div className="text-center"><p className="text-sm font-medium text-gray-600">Click to select or drag & drop CSV</p><p className="text-xs text-gray-400 mt-0.5">Only .csv files</p></div>
+              }
+              <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => handleFile(e.target.files[0])} />
+            </div>
+          </div>
+
+          {/* preview */}
+          {csvRows.length > 0 && !result && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Preview ({csvRows.length} rows)</p>
+              <div className="border border-gray-100 rounded-xl overflow-hidden max-h-40 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>{cfg.headers.map(h => <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 capitalize">{h.replace(/_/g,' ')}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {csvRows.map((row, i) => (
+                      <tr key={i} className="border-t border-gray-50">
+                        {cfg.headers.map(h => <td key={h} className="px-3 py-1.5 text-gray-600">{row[h]}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* result */}
+          {result && (
+            <div className={`rounded-xl p-4 ${result.failed === 0 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+              <p className={`font-semibold text-sm ${result.failed === 0 ? 'text-green-700' : 'text-amber-700'}`}>
+                Upload done — {result.success} added{result.failed > 0 ? `, ${result.failed} failed` : ''}
+              </p>
+              {result.errors.length > 0 && (
+                <ul className="mt-1 space-y-0.5">
+                  {result.errors.slice(0, 5).map((e, i) => <li key={i} className="text-xs text-red-600">• {e}</li>)}
+                  {result.errors.length > 5 && <li className="text-xs text-gray-400">…and {result.errors.length - 5} more</li>}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* footer */}
+        <div className="flex gap-3 px-6 pb-5 pt-2 border-t border-gray-100 shrink-0">
+          <button className="btn-secondary flex-1" onClick={onClose}>Close</button>
+          {csvRows.length > 0 && !result && (
+            <button onClick={handleUpload} disabled={uploading} className="btn-primary flex-1 justify-center">
+              {uploading
+                ? <><svg className="w-4 h-4 animate-spin mr-1" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Uploading…</>
+                : `Upload ${csvRows.length} ${cfg.label}`}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Water Body Bulk Upload Modal ──────────────────────────────────────────────
+const WB_HEADERS = ['name', 'wb_type', 'survey_number', 'taluk_name', 'village', 'area', 'address', 'latitude', 'longitude', 'notes']
+const WB_EXAMPLE = [
+  ['Ramaneri Kanmai', 'Kanmai', '123/4A', 'Ramanathapuram', 'Ramaneri', '12.5 ha', 'Ramaneri Village, Ramanathapuram', '9.371234', '78.831234', 'Near NH-49'],
+  ['Pamban Tank', 'Lake', '456/2B', 'Rameswaram', 'Pamban', '8.2 ha', 'Pamban, Rameswaram Taluk', '9.285000', '79.210000', 'Coastal area'],
+  ['Kamuthi Pond', 'Pond', '789/3C', 'Kamuthi', 'Kamuthi', '5.0 ha', 'Kamuthi Town', '9.410000', '78.380000', ''],
+]
+const WB_TYPES_LIST = ['Kanmai', 'Lake', 'Pond', 'Canal', 'River']
+
+function WbBulkModal({ onClose, talukNames, onDone, toast }) {
+  const [csvFile, setCsvFile] = useState(null)
+  const [csvRows, setCsvRows] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [result, setResult] = useState(null)
+  const fileRef = useRef(null)
+
+  function handleFile(file) {
+    if (!file) return
+    setCsvFile(file); setResult(null)
+    const reader = new FileReader()
+    reader.onload = e => setCsvRows(parseCSV(e.target.result))
+    reader.readAsText(file)
+  }
+
+  async function handleUpload() {
+    if (!csvRows.length) return
+    setUploading(true); setResult(null)
+    let success = 0, failed = 0, errors = []
+    for (const row of csvRows) {
+      try { await wbApi.create(row); success++ }
+      catch (err) { failed++; errors.push(`${row.name || '?'}: ${err.message || 'failed'}`) }
+    }
+    setResult({ success, failed, errors })
+    setUploading(false)
+    if (success > 0) { toast(`${success} water bodies added!`, 'success'); onDone() }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 shrink-0">
+          <h3 className="font-heading font-bold text-lg text-gray-800">Bulk Upload — Water Bodies</h3>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400">✕</button>
+        </div>
+
+        <div className="overflow-y-auto px-6 py-4 space-y-4">
+          {/* field guide */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {[
+              { field: 'name', desc: 'Water body name (required)', required: true },
+              { field: 'wb_type', desc: `${WB_TYPES_LIST.join(' | ')}`, required: true },
+              { field: 'survey_number', desc: 'Revenue survey number e.g. 123/4A' },
+              { field: 'taluk_name', desc: `Taluk: ${talukNames.slice(0,3).join(', ')}…`, required: true },
+              { field: 'village', desc: 'Village or locality name' },
+              { field: 'area', desc: 'Area with unit e.g. 12.5 ha' },
+              { field: 'address', desc: 'Full address (optional)' },
+              { field: 'latitude', desc: 'GPS latitude e.g. 9.371234' },
+              { field: 'longitude', desc: 'GPS longitude e.g. 78.831234' },
+              { field: 'notes', desc: 'Additional notes (optional)' },
+            ].map(({ field, desc, required }) => (
+              <div key={field} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                <code className={`text-xs font-mono font-bold shrink-0 ${required ? 'text-accent' : 'text-gray-500'}`}>{field}</code>
+                {required && <span className="text-[10px] text-red-400 shrink-0 mt-0.5">*</span>}
+                <span className="text-xs text-gray-500 leading-relaxed">{desc}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* step 1 */}
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-blue-800 text-sm">Step 1 — Download Template</p>
+              <p className="text-[11px] text-blue-500 font-mono mt-1">{WB_HEADERS.join('  |  ')}</p>
+            </div>
+            <button
+              onClick={() => downloadCSV('water_bodies_template.csv', WB_HEADERS, WB_EXAMPLE)}
+              className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              Download CSV
+            </button>
+          </div>
+
+          {/* step 2 */}
+          <div>
+            <p className="font-semibold text-gray-700 text-sm mb-2">Step 2 — Fill & Upload</p>
+            <div className="border-2 border-dashed border-gray-200 rounded-xl p-5 flex flex-col items-center gap-2 hover:border-accent/50 hover:bg-accent/5 transition-colors cursor-pointer"
+              onClick={() => fileRef.current?.click()}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }}>
+              <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              {csvFile
+                ? <div className="text-center"><p className="font-semibold text-accent text-sm">{csvFile.name}</p><p className="text-xs text-gray-400">{csvRows.length} water bodies ready</p></div>
+                : <div className="text-center"><p className="text-sm font-medium text-gray-600">Click to select or drag & drop CSV</p><p className="text-xs text-gray-400 mt-0.5">Only .csv files</p></div>
+              }
+              <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => handleFile(e.target.files[0])} />
+            </div>
+          </div>
+
+          {/* preview */}
+          {csvRows.length > 0 && !result && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Preview ({csvRows.length} rows)</p>
+              <div className="border border-gray-100 rounded-xl overflow-hidden max-h-44 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>{['name','wb_type','survey_number','taluk_name','village','area'].map(h =>
+                      <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 capitalize">{h.replace(/_/g,' ')}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {csvRows.map((row, i) => (
+                      <tr key={i} className="border-t border-gray-50">
+                        <td className="px-3 py-1.5 font-medium text-gray-800">{row.name}</td>
+                        <td className="px-3 py-1.5 text-gray-600">{row.wb_type}</td>
+                        <td className="px-3 py-1.5 text-gray-600">{row.survey_number || '—'}</td>
+                        <td className="px-3 py-1.5 text-gray-600">{row.taluk_name}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{row.village}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{row.area}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* result */}
+          {result && (
+            <div className={`rounded-xl p-4 ${result.failed === 0 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+              <p className={`font-semibold text-sm ${result.failed === 0 ? 'text-green-700' : 'text-amber-700'}`}>
+                Upload done — {result.success} added{result.failed > 0 ? `, ${result.failed} failed` : ''}
+              </p>
+              {result.errors.length > 0 && (
+                <ul className="mt-1 space-y-0.5">
+                  {result.errors.slice(0, 5).map((e, i) => <li key={i} className="text-xs text-red-600">• {e}</li>)}
+                  {result.errors.length > 5 && <li className="text-xs text-gray-400">…and {result.errors.length - 5} more</li>}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3 px-6 pb-5 pt-2 border-t border-gray-100 shrink-0">
+          <button className="btn-secondary flex-1" onClick={onClose}>Close</button>
+          {csvRows.length > 0 && !result && (
+            <button onClick={handleUpload} disabled={uploading} className="btn-primary flex-1 justify-center">
+              {uploading
+                ? <><svg className="w-4 h-4 animate-spin mr-1" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Uploading…</>
+                : `Upload ${csvRows.length} Water Bodies`}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Location Picker map ───────────────────────────────────────────────────────
 function LocationPicker({ lat, lon, onChange }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
@@ -95,30 +478,15 @@ function LocationPicker({ lat, lon, onChange }) {
     else markerRef.current = L.marker(pos).addTo(mapRef.current)
     mapRef.current.setView(pos, 14, { animate: true })
   }, [lat, lon])
-  return <div ref={containerRef} style={{ width: '100%', height: 220, borderRadius: 10, overflow: 'hidden', border: '1px solid #e2eaf2' }} />
+  return <div ref={containerRef} style={{ width:'100%', height:220, borderRadius:10, overflow:'hidden', border:'1px solid #e2eaf2' }} />
 }
 
-const CSV_HEADERS = ['name','wb_type','taluk_name','village','area','latitude','longitude','notes']
-const CSV_EXAMPLE = [
-  ['Ramaneri Kanmai','Kanmai','Ramanathapuram','Ramaneri','12.5 ha','9.371234','78.831234','Near NH-49'],
-  ['Pamban Tank','Lake','Rameswaram','Pamban','8.2 ha','9.285000','79.210000','Coastal area'],
-]
-function downloadTemplate() {
-  const rows = [CSV_HEADERS, ...CSV_EXAMPLE]
-  const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = url; a.download = 'water_bodies_template.csv'; a.click()
-  URL.revokeObjectURL(url)
-}
-
-// ── main page ─────────────────────────────────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function MasterData() {
   const { toast } = useApp()
   const [activeTab, setActiveTab] = useState('hierarchy')
   const [hierarchy, setHierarchy] = useState(null)
   const [hierLoading, setHierLoading] = useState(true)
-  const [districtId] = useState(1)
 
   const [openDivs, setOpenDivs] = useState({})
   const [openTaluks, setOpenTaluks] = useState({})
@@ -127,22 +495,22 @@ export default function MasterData() {
   const [modal, setModal] = useState(null)
   const [saving, setSaving] = useState(false)
 
+  // bulk upload modals
+  const [showGeoBulk, setShowGeoBulk] = useState(false)
+  const [showWbBulk, setShowWbBulk] = useState(false)
+
+  // register tab
   const [search, setSearch] = useState('')
   const [filterTaluk, setFilterTaluk] = useState('')
   const [taluks, setTaluks] = useState([])
+  const [localBodies, setLocalBodies] = useState([])
   const [bodies, setBodies] = useState([])
   const [loadingBodies, setLoadingBodies] = useState(false)
 
+  // manual add water body
   const [showManual, setShowManual] = useState(false)
   const [manualForm, setManualForm] = useState({ name:'', wb_type:'Kanmai', taluk_name:'', village:'', area:'', survey_number:'', latitude:'', longitude:'', address:'', notes:'' })
   const [manualSaving, setManualSaving] = useState(false)
-
-  const [showBulk, setShowBulk] = useState(false)
-  const [csvRows, setCsvRows] = useState([])
-  const [csvFile, setCsvFile] = useState(null)
-  const [bulkUploading, setBulkUploading] = useState(false)
-  const [bulkResult, setBulkResult] = useState(null)
-  const csvRef = useRef(null)
   const [geocoding, setGeocoding] = useState(false)
   const geocodeTimerRef = useRef(null)
 
@@ -165,6 +533,9 @@ export default function MasterData() {
 
   useEffect(() => { loadHierarchy() }, [loadHierarchy])
   useEffect(() => { refreshTaluks() }, [refreshTaluks])
+  useEffect(() => {
+    geo.localBodies().then(d => setLocalBodies(Array.isArray(d) ? d : (d.results || []))).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (activeTab !== 'register') return
@@ -199,30 +570,22 @@ export default function MasterData() {
     }, 800)
   }
 
-  // ── hierarchy CRUD ─────────────────────────────────────────────────────────
+  // hierarchy CRUD
   async function handleSave(vals) {
     setSaving(true)
     try {
       const { type, parentId, item } = modal
-      if (type === 'add-taluk') {
-        const division = vals.division === '__new__' ? vals.new_division : vals.division
-        await geo.addTaluk({ district: districtId, name: vals.name, division })
-      } else if (type === 'edit-taluk') {
-        const division = vals.division === '__new__' ? vals.new_division : vals.division
-        await geo.updateTaluk(item.id, { name: vals.name, division })
-      } else if (type === 'add-panchayat') {
-        await geo.addLocalBody({ taluk: parentId, name: vals.name, lb_type: vals.lb_type })
-      } else if (type === 'edit-panchayat') {
-        await geo.updateLocalBody(item.id, { name: vals.name, lb_type: vals.lb_type })
-      } else if (type === 'add-village') {
-        await geo.addVillage({ panchayat: parentId, name: vals.name })
-      } else if (type === 'edit-village') {
-        await geo.updateVillage(item.id, { name: vals.name })
-      }
+      const division = vals.division === '__new__' ? vals.new_division : vals.division
+      if (type === 'add-taluk') await geo.addTaluk({ district: 1, name: vals.name, division })
+      else if (type === 'edit-taluk') await geo.updateTaluk(item.id, { name: vals.name, division })
+      else if (type === 'add-panchayat') await geo.addLocalBody({ taluk: parentId, name: vals.name, lb_type: vals.lb_type })
+      else if (type === 'edit-panchayat') await geo.updateLocalBody(item.id, { name: vals.name, lb_type: vals.lb_type })
+      else if (type === 'add-village') await geo.addVillage({ panchayat: parentId, name: vals.name })
+      else if (type === 'edit-village') await geo.updateVillage(item.id, { name: vals.name })
       toast('Saved!', 'success')
       setModal(null)
-      loadHierarchy()
-      refreshTaluks()
+      loadHierarchy(); refreshTaluks()
+      geo.localBodies().then(d => setLocalBodies(Array.isArray(d) ? d : (d.results || []))).catch(() => {})
     } catch (err) { toast(err.message || 'Save failed', 'error') }
     finally { setSaving(false) }
   }
@@ -234,8 +597,7 @@ export default function MasterData() {
       else if (type === 'panchayat') await geo.deleteLocalBody(item.id)
       else if (type === 'village') await geo.deleteVillage(item.id)
       toast(`"${item.name}" deleted`, 'success')
-      loadHierarchy()
-      refreshTaluks()
+      loadHierarchy(); refreshTaluks()
     } catch (err) { toast(err.message || 'Delete failed', 'error') }
   }
 
@@ -247,14 +609,10 @@ export default function MasterData() {
       return {
         title: type === 'add-taluk' ? 'Add Taluk' : 'Edit Taluk',
         fields: [
-          { key: 'name', label: 'Taluk Name', placeholder: 'e.g. Rameswaram', autoFocus: true, default: item?.name || '' },
-          { key: 'division', label: 'Revenue Division', type: 'select', default: item?.division || (existingDivisions[0] || ''),
-            options: [
-              ...existingDivisions.map(d => ({ value: d, label: d })),
-              { value: '__new__', label: '+ Enter new division name' },
-            ]
-          },
-          { key: 'new_division', label: 'New Division Name (if selected above)', placeholder: 'e.g. New Division', default: '' },
+          { key:'name', label:'Taluk Name', placeholder:'e.g. Rameswaram', autoFocus:true, default: item?.name || '' },
+          { key:'division', label:'Revenue Division', type:'select', default: item?.division || (existingDivisions[0] || ''),
+            options: [...existingDivisions.map(d => ({value:d, label:d})), { value:'__new__', label:'+ New division name' }] },
+          { key:'new_division', label:'New Division Name (if selected above)', placeholder:'e.g. New Division', default:'' },
         ]
       }
     }
@@ -262,17 +620,16 @@ export default function MasterData() {
       return {
         title: type === 'add-panchayat' ? 'Add Panchayat / Block' : 'Edit Panchayat / Block',
         fields: [
-          { key: 'name', label: 'Panchayat / Block Name', placeholder: 'e.g. Pamban Town Panchayat', autoFocus: true, default: item?.name || '' },
-          { key: 'lb_type', label: 'Type', type: 'select', default: item?.type || 'Panchayat',
-            options: ['Municipality', 'Town Panchayat', 'Panchayat', 'Block'].map(o => ({ value: o, label: o }))
-          },
+          { key:'name', label:'Panchayat / Block Name', placeholder:'e.g. Pamban Town Panchayat', autoFocus:true, default: item?.name || '' },
+          { key:'lb_type', label:'Type', type:'select', default: item?.type || 'Panchayat',
+            options: ['Municipality','Town Panchayat','Panchayat','Block'].map(o => ({value:o, label:o})) },
         ]
       }
     }
     if (type === 'add-village' || type === 'edit-village') {
       return {
         title: type === 'add-village' ? 'Add Village' : 'Edit Village',
-        fields: [{ key: 'name', label: 'Village Name', placeholder: 'e.g. Pamban', autoFocus: true, default: item?.name || '' }]
+        fields: [{ key:'name', label:'Village Name', placeholder:'e.g. Pamban', autoFocus:true, default: item?.name || '' }]
       }
     }
     return null
@@ -288,36 +645,8 @@ export default function MasterData() {
       setShowManual(false)
       setManualForm({ name:'', wb_type:'Kanmai', taluk_name:'', village:'', area:'', survey_number:'', latitude:'', longitude:'', address:'', notes:'' })
       if (activeTab === 'register') { const d = await wbApi.list({}); setBodies(Array.isArray(d) ? d : (d.results || [])) }
-    } catch (err) { toast(err.message || 'Failed to add water body', 'error') }
+    } catch (err) { toast(err.message || 'Failed to add', 'error') }
     finally { setManualSaving(false) }
-  }
-
-  function handleCsvFile(file) {
-    if (!file) return
-    setCsvFile(file); setBulkResult(null)
-    const reader = new FileReader()
-    reader.onload = e => {
-      const lines = e.target.result.split('\n').map(l => l.trim()).filter(Boolean)
-      if (lines.length < 2) { toast('CSV needs header + data rows', 'error'); return }
-      const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim())
-      const rows = lines.slice(1).map(line => {
-        const vals = line.split(',').map(v => v.replace(/"/g, '').trim())
-        const obj = {}; headers.forEach((h, i) => { obj[h] = vals[i] || '' }); return obj
-      })
-      setCsvRows(rows)
-    }
-    reader.readAsText(file)
-  }
-
-  async function handleBulkUpload() {
-    if (!csvRows.length) return
-    setBulkUploading(true); setBulkResult(null)
-    let success = 0, failed = 0, errors = []
-    for (const row of csvRows) {
-      try { await wbApi.create(row); success++ } catch { failed++; errors.push(row.name || '?') }
-    }
-    setBulkResult({ success, failed, errors }); setBulkUploading(false)
-    if (success > 0) { toast(`${success} water bodies added!`, 'success'); const d = await wbApi.list({}); setBodies(Array.isArray(d) ? d : (d.results || [])) }
   }
 
   const modalCfg = getModalConfig()
@@ -326,7 +655,7 @@ export default function MasterData() {
     <div className="animate-fade-in space-y-5">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <button className="btn-secondary" onClick={() => setShowBulk(true)}>
+        <button className="btn-secondary" onClick={() => activeTab === 'hierarchy' ? setShowGeoBulk(true) : setShowWbBulk(true)}>
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
           Bulk Upload
         </button>
@@ -338,7 +667,7 @@ export default function MasterData() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-        {[{ key:'hierarchy', label:'Geographic Hierarchy' }, { key:'register', label:'Water Body Register' }].map(tab => (
+        {[{key:'hierarchy',label:'Geographic Hierarchy'},{key:'register',label:'Water Body Register'}].map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {tab.label}
@@ -349,7 +678,7 @@ export default function MasterData() {
       {/* ── Geographic Hierarchy ──────────────────────────────────────────── */}
       {activeTab === 'hierarchy' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Guide panel */}
+          {/* Guide */}
           <div className="card p-5">
             <h3 className="font-heading font-bold text-gray-800 mb-4">Administrative Structure</h3>
             <div className="space-y-2.5">
@@ -366,30 +695,26 @@ export default function MasterData() {
               ))}
             </div>
             <div className="mt-5 pt-4 border-t border-gray-100 space-y-2">
-              <p className="text-xs font-semibold text-gray-500">How to add / edit / delete:</p>
-              <div className="bg-accent/5 border border-accent/15 rounded-xl px-3 py-3 space-y-2">
-                <div className="flex items-start gap-2 text-xs text-gray-600">
-                  <span className="w-5 h-5 flex items-center justify-center rounded-full bg-accent text-white text-[10px] font-bold shrink-0 mt-0.5">+</span>
-                  <span><strong>Add child</strong> — hover a row and click the green <strong>+</strong> button on the right</span>
-                </div>
-                <div className="flex items-start gap-2 text-xs text-gray-600">
-                  <span className="w-5 h-5 flex items-center justify-center rounded-full bg-blue-500 text-white text-[10px] shrink-0 mt-0.5">✎</span>
-                  <span><strong>Edit</strong> — hover a row and click the blue pencil icon</span>
-                </div>
-                <div className="flex items-start gap-2 text-xs text-gray-600">
-                  <span className="w-5 h-5 flex items-center justify-center rounded-full bg-red-400 text-white text-[10px] shrink-0 mt-0.5">🗑</span>
-                  <span><strong>Delete</strong> — hover a row and click the red trash icon</span>
-                </div>
+              <p className="text-xs font-semibold text-gray-500">How to manage:</p>
+              <div className="bg-accent/5 border border-accent/15 rounded-xl px-3 py-3 space-y-1.5">
+                <p className="text-xs text-gray-600"><span className="text-accent font-bold">+</span> Hover row → green + to add child</p>
+                <p className="text-xs text-gray-600"><span className="text-blue-500">✎</span> Hover row → pencil to edit</p>
+                <p className="text-xs text-gray-600"><span className="text-red-400">🗑</span> Hover row → trash to delete</p>
+                <p className="text-xs text-gray-600">▶ Click row to expand/collapse</p>
               </div>
-              <p className="text-xs text-gray-400">Click the arrow ▶ to expand/collapse levels</p>
+              <button onClick={() => setShowGeoBulk(true)}
+                className="w-full mt-2 flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-dashed border-accent/40 text-accent text-xs font-semibold hover:bg-accent/5 transition-colors">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                Bulk Upload Taluks / Panchayats / Villages
+              </button>
             </div>
           </div>
 
-          {/* Hierarchy tree */}
+          {/* Tree */}
           <div className="card p-5 lg:col-span-2">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-heading font-bold text-gray-800">Hierarchy Tree</h3>
-              <button onClick={() => setModal({ type: 'add-taluk' })}
+              <button onClick={() => setModal({ type:'add-taluk' })}
                 className="flex items-center gap-1.5 text-xs font-semibold text-accent border border-accent/30 bg-accent/5 hover:bg-accent/10 px-3 py-1.5 rounded-lg transition-colors">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 4v16m8-8H4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
                 Add Taluk
@@ -400,11 +725,8 @@ export default function MasterData() {
 
             {!hierLoading && hierarchy && (
               <div className="space-y-1 select-none">
-                {/* District */}
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/5 border border-accent/15 mb-3">
-                  <svg className="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
-                  </svg>
+                  <svg className="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
                   <span className="font-bold text-accent text-sm">{hierarchy.district || 'Ramanathapuram'} District</span>
                 </div>
 
@@ -416,15 +738,10 @@ export default function MasterData() {
 
                 {hierarchy.divisions?.map(div => (
                   <div key={div.name} className="mb-1">
-                    {/* Division row */}
                     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50/70 mb-1 cursor-pointer"
                       onClick={() => setOpenDivs(p => ({ ...p, [div.name]: !p[div.name] }))}>
-                      <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${openDivs[div.name] ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
-                      </svg>
-                      <svg className="w-4 h-4 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-                      </svg>
+                      <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${openDivs[div.name] ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+                      <svg className="w-4 h-4 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
                       <span className="font-semibold text-blue-800 text-sm flex-1">{div.name}</span>
                       <span className="text-xs text-blue-400 bg-blue-100 px-2 py-0.5 rounded-full">{div.taluks?.length} taluks</span>
                     </div>
@@ -433,23 +750,17 @@ export default function MasterData() {
                       <div className="ml-5 border-l-2 border-blue-100 pl-3 space-y-0.5 mb-2">
                         {div.taluks?.map(taluk => (
                           <div key={taluk.id}>
-                            {/* Taluk row */}
                             <div className="group flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-teal-50 transition-colors">
-                              <button onClick={() => setOpenTaluks(p => ({ ...p, [taluk.id]: !p[taluk.id] }))}
+                              <button onClick={() => setOpenTaluks(p => ({...p, [taluk.id]: !p[taluk.id]}))}
                                 className="flex items-center gap-2 flex-1 text-left min-w-0">
-                                <svg className={`w-3 h-3 text-gray-400 transition-transform shrink-0 ${openTaluks[taluk.id] ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
-                                </svg>
-                                <svg className="w-3.5 h-3.5 text-teal-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z"/>
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                </svg>
+                                <svg className={`w-3 h-3 text-gray-400 transition-transform shrink-0 ${openTaluks[taluk.id] ? 'rotate-90':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+                                <svg className="w-3.5 h-3.5 text-teal-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                                 <span className="font-medium text-gray-700 text-sm truncate">{taluk.name} Taluk</span>
                                 {taluk.wb_count > 0 && <span className="text-xs text-accent font-semibold bg-accent/10 px-1.5 py-0.5 rounded-full shrink-0">{taluk.wb_count} WB</span>}
                               </button>
                               <div className="flex items-center gap-1 shrink-0">
-                                <PlusBtn title="Add Panchayat" onClick={e => { e.stopPropagation(); setModal({ type:'add-panchayat', parentId: taluk.id }) }} />
-                                <EditBtn onClick={e => { e.stopPropagation(); setModal({ type:'edit-taluk', item: { id: taluk.id, name: taluk.name, division: div.name } }) }} />
+                                <PlusBtn title="Add Panchayat" onClick={e => { e.stopPropagation(); setModal({type:'add-panchayat', parentId:taluk.id}) }} />
+                                <EditBtn onClick={e => { e.stopPropagation(); setModal({type:'edit-taluk', item:{id:taluk.id, name:taluk.name, division:div.name}}) }} />
                                 <DelBtn onClick={e => { e.stopPropagation(); handleDelete('taluk', taluk) }} />
                               </div>
                             </div>
@@ -459,27 +770,23 @@ export default function MasterData() {
                                 {taluk.panchayats?.length === 0 && (
                                   <div className="px-3 py-1.5 text-xs text-gray-400 italic">
                                     No panchayats.{' '}
-                                    <button onClick={() => setModal({ type:'add-panchayat', parentId: taluk.id })} className="text-accent font-semibold hover:underline">+ Add</button>
+                                    <button onClick={() => setModal({type:'add-panchayat', parentId:taluk.id})} className="text-accent font-semibold hover:underline">+ Add</button>
                                   </div>
                                 )}
                                 {taluk.panchayats?.map(p => (
                                   <div key={p.id}>
                                     <div className="group flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-orange-50 transition-colors">
-                                      <button onClick={() => setOpenPanchayats(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
+                                      <button onClick={() => setOpenPanchayats(prev => ({...prev, [p.id]: !prev[p.id]}))}
                                         className="flex items-center gap-2 flex-1 text-left min-w-0">
-                                        <svg className={`w-2.5 h-2.5 text-gray-300 transition-transform shrink-0 ${openPanchayats[p.id] ? 'rotate-90' : ''} ${p.villages?.length === 0 ? 'opacity-0 pointer-events-none' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
-                                        </svg>
-                                        <svg className="w-3.5 h-3.5 text-orange-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
-                                        </svg>
+                                        <svg className={`w-2.5 h-2.5 text-gray-300 transition-transform shrink-0 ${openPanchayats[p.id]?'rotate-90':''} ${p.villages?.length===0?'opacity-0 pointer-events-none':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+                                        <svg className="w-3.5 h-3.5 text-orange-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
                                         <span className="text-sm text-gray-600 truncate">{p.name}</span>
                                         <span className="ml-1 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full shrink-0">{p.type}</span>
                                         {p.villages?.length > 0 && <span className="text-[10px] text-gray-400 shrink-0">{p.villages.length}v</span>}
                                       </button>
                                       <div className="flex items-center gap-1 shrink-0">
-                                        <PlusBtn title="Add Village" onClick={e => { e.stopPropagation(); setModal({ type:'add-village', parentId: p.id }) }} />
-                                        <EditBtn onClick={e => { e.stopPropagation(); setModal({ type:'edit-panchayat', item: { id: p.id, name: p.name, type: p.type } }) }} />
+                                        <PlusBtn title="Add Village" onClick={e => { e.stopPropagation(); setModal({type:'add-village', parentId:p.id}) }} />
+                                        <EditBtn onClick={e => { e.stopPropagation(); setModal({type:'edit-panchayat', item:{id:p.id, name:p.name, type:p.type}}) }} />
                                         <DelBtn onClick={e => { e.stopPropagation(); handleDelete('panchayat', p) }} />
                                       </div>
                                     </div>
@@ -490,7 +797,7 @@ export default function MasterData() {
                                             <div className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0"/>
                                             <span className="text-xs text-gray-500 flex-1">{v.name}</span>
                                             <div className="flex items-center gap-1 shrink-0">
-                                              <EditBtn onClick={e => { e.stopPropagation(); setModal({ type:'edit-village', item: { id: v.id, name: v.name } }) }} />
+                                              <EditBtn onClick={e => { e.stopPropagation(); setModal({type:'edit-village', item:{id:v.id, name:v.name}}) }} />
                                               <DelBtn onClick={e => { e.stopPropagation(); handleDelete('village', v) }} />
                                             </div>
                                           </div>
@@ -538,7 +845,12 @@ export default function MasterData() {
                 <tbody>
                   {loadingBodies && <tr><td colSpan={7} className="text-center py-8 text-gray-400">Loading…</td></tr>}
                   {!loadingBodies && bodies.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-12 text-gray-400">No records. <button onClick={() => setShowManual(true)} className="text-accent font-semibold hover:underline">+ Add one</button></td></tr>
+                    <tr><td colSpan={7} className="text-center py-12 text-gray-400">
+                      No records.{' '}
+                      <button onClick={() => setShowManual(true)} className="text-accent font-semibold hover:underline">+ Add one</button>
+                      {' '}or{' '}
+                      <button onClick={() => setShowWbBulk(true)} className="text-accent font-semibold hover:underline">Bulk Upload</button>
+                    </td></tr>
                   )}
                   {bodies.map(b => (
                     <tr key={b.id} className="border-b border-gray-50 hover:bg-gray-50">
@@ -558,12 +870,33 @@ export default function MasterData() {
         </div>
       )}
 
-      {/* ── Hierarchy CRUD Modal ──────────────────────────────────────────── */}
+      {/* ── Hierarchy CRUD mini-modal ─────────────────────────────────────── */}
       {modal && modalCfg && (
         <MiniModal title={modalCfg.title} fields={modalCfg.fields} saving={saving} onSave={handleSave} onClose={() => setModal(null)} />
       )}
 
-      {/* ── Add Water Body Modal ──────────────────────────────────────────── */}
+      {/* ── Geo Bulk Upload Modal ─────────────────────────────────────────── */}
+      {showGeoBulk && (
+        <GeoBulkModal
+          onClose={() => setShowGeoBulk(false)}
+          taluks={taluks}
+          localBodies={localBodies}
+          toast={toast}
+          onDone={() => { loadHierarchy(); refreshTaluks() }}
+        />
+      )}
+
+      {/* ── Water Body Bulk Upload Modal ──────────────────────────────────── */}
+      {showWbBulk && (
+        <WbBulkModal
+          onClose={() => setShowWbBulk(false)}
+          talukNames={talukNames}
+          toast={toast}
+          onDone={async () => { const d = await wbApi.list({}); setBodies(Array.isArray(d) ? d : (d.results || [])) }}
+        />
+      )}
+
+      {/* ── Add Water Body Manual Modal ───────────────────────────────────── */}
       {showManual && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setShowManual(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -576,43 +909,43 @@ export default function MasterData() {
                 <div className="sm:col-span-2">
                   <label className="label">Water Body Name *</label>
                   <input className="input" placeholder="e.g. Ramaneri Kanmai" autoFocus required
-                    value={manualForm.name} onChange={e => setManualForm(f => ({...f, name: e.target.value}))} />
+                    value={manualForm.name} onChange={e => setManualForm(f => ({...f, name:e.target.value}))} />
                 </div>
                 <div>
                   <label className="label">Type</label>
-                  <select className="input" value={manualForm.wb_type} onChange={e => setManualForm(f => ({...f, wb_type: e.target.value}))}>
-                    {['Kanmai','Lake','Pond','Canal','River'].map(t => <option key={t}>{t}</option>)}
+                  <select className="input" value={manualForm.wb_type} onChange={e => setManualForm(f => ({...f, wb_type:e.target.value}))}>
+                    {WB_TYPES_LIST.map(t => <option key={t}>{t}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="label">Taluk *</label>
-                  <select className="input" required value={manualForm.taluk_name} onChange={e => setManualForm(f => ({...f, taluk_name: e.target.value}))}>
+                  <select className="input" required value={manualForm.taluk_name} onChange={e => setManualForm(f => ({...f, taluk_name:e.target.value}))}>
                     <option value="">Select Taluk</option>
                     {talukNames.map(t => <option key={t}>{t}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="label">Village</label>
-                  <input className="input" placeholder="Village name" value={manualForm.village} onChange={e => setManualForm(f => ({...f, village: e.target.value}))} />
+                  <input className="input" placeholder="Village name" value={manualForm.village} onChange={e => setManualForm(f => ({...f, village:e.target.value}))} />
                 </div>
                 <div>
                   <label className="label">Area</label>
-                  <input className="input" placeholder="e.g. 12.5 ha" value={manualForm.area} onChange={e => setManualForm(f => ({...f, area: e.target.value}))} />
+                  <input className="input" placeholder="e.g. 12.5 ha" value={manualForm.area} onChange={e => setManualForm(f => ({...f, area:e.target.value}))} />
                 </div>
                 <div className="sm:col-span-2">
                   <label className="label">Survey Number</label>
-                  <input className="input" placeholder="e.g. 123/4A" value={manualForm.survey_number} onChange={e => setManualForm(f => ({...f, survey_number: e.target.value}))} />
+                  <input className="input" placeholder="e.g. 123/4A" value={manualForm.survey_number} onChange={e => setManualForm(f => ({...f, survey_number:e.target.value}))} />
                 </div>
                 <div className="sm:col-span-2 space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="label mb-0">Location on Map</label>
                     <button type="button" className="text-xs font-semibold text-accent flex items-center gap-1 px-2.5 py-1 rounded-lg border border-accent/30 bg-accent/5 hover:bg-accent/10 transition-all"
-                      onClick={() => { navigator.geolocation?.getCurrentPosition(pos => { const lat = pos.coords.latitude.toFixed(6); const lon = pos.coords.longitude.toFixed(6); setManualForm(f => ({...f, latitude: lat, longitude: lon})); reverseGeocode(lat, lon) }) }}>
+                      onClick={() => { navigator.geolocation?.getCurrentPosition(pos => { const lat = pos.coords.latitude.toFixed(6); const lon = pos.coords.longitude.toFixed(6); setManualForm(f => ({...f, latitude:lat, longitude:lon})); reverseGeocode(lat, lon) }) }}>
                       Use my GPS
                     </button>
                   </div>
                   <LocationPicker lat={manualForm.latitude} lon={manualForm.longitude}
-                    onChange={(lat, lon) => { setManualForm(f => ({...f, latitude: lat, longitude: lon})); reverseGeocode(lat, lon) }} />
+                    onChange={(lat, lon) => { setManualForm(f => ({...f, latitude:lat, longitude:lon})); reverseGeocode(lat, lon) }} />
                   {manualForm.latitude && manualForm.longitude && (
                     <div className="text-xs font-mono text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">
                       {manualForm.latitude}°N, {manualForm.longitude}°E
@@ -629,7 +962,7 @@ export default function MasterData() {
                 </div>
                 <div className="sm:col-span-2">
                   <label className="label">Notes</label>
-                  <textarea className="input min-h-16 resize-y" value={manualForm.notes} onChange={e => setManualForm(f => ({...f, notes: e.target.value}))} />
+                  <textarea className="input min-h-16 resize-y" value={manualForm.notes} onChange={e => setManualForm(f => ({...f, notes:e.target.value}))} />
                 </div>
               </div>
               <div className="flex gap-3 pt-2">
@@ -637,58 +970,6 @@ export default function MasterData() {
                 <button type="submit" className="btn-primary flex-1 justify-center" disabled={manualSaving}>{manualSaving ? 'Saving…' : 'Add Water Body'}</button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* ── Bulk Upload Modal ─────────────────────────────────────────────── */}
-      {showBulk && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { setShowBulk(false); setCsvRows([]); setCsvFile(null); setBulkResult(null) }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 space-y-5" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h3 className="font-heading font-bold text-lg text-gray-800">Bulk Upload Water Bodies</h3>
-              <button onClick={() => { setShowBulk(false); setCsvRows([]); setCsvFile(null); setBulkResult(null) }} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400">✕</button>
-            </div>
-            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between gap-4">
-              <div>
-                <p className="font-semibold text-blue-800 text-sm">Step 1: Download Template</p>
-                <p className="text-[11px] text-blue-400 mt-1 font-mono">{CSV_HEADERS.join(', ')}</p>
-              </div>
-              <button onClick={downloadTemplate} className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Download CSV</button>
-            </div>
-            <div>
-              <p className="font-semibold text-gray-700 text-sm mb-2">Step 2: Upload Filled CSV</p>
-              <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 flex flex-col items-center gap-3 hover:border-accent/50 hover:bg-accent/5 transition-colors cursor-pointer"
-                onClick={() => csvRef.current?.click()} onDragOver={e => e.preventDefault()}
-                onDrop={e => { e.preventDefault(); handleCsvFile(e.dataTransfer.files[0]) }}>
-                {csvFile ? <div className="text-center"><p className="font-semibold text-accent text-sm">{csvFile.name}</p><p className="text-xs text-gray-400">{csvRows.length} rows ready</p></div>
-                  : <div className="text-center"><p className="text-sm font-medium text-gray-600">Click to select or drag & drop CSV</p></div>}
-                <input ref={csvRef} type="file" accept=".csv" className="hidden" onChange={e => handleCsvFile(e.target.files[0])} />
-              </div>
-            </div>
-            {csvRows.length > 0 && !bulkResult && (
-              <div className="border border-gray-100 rounded-xl overflow-hidden max-h-44 overflow-y-auto">
-                <table className="w-full text-xs"><thead className="bg-gray-50 sticky top-0"><tr>{['Name','Type','Taluk','Village','Area'].map(h => <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500">{h}</th>)}</tr></thead>
-                  <tbody>{csvRows.map((row, i) => <tr key={i} className="border-t border-gray-50"><td className="px-3 py-2 font-medium text-gray-800">{row.name}</td><td className="px-3 py-2 text-gray-600">{row.wb_type}</td><td className="px-3 py-2 text-gray-600">{row.taluk_name}</td><td className="px-3 py-2 text-gray-500">{row.village}</td><td className="px-3 py-2 text-gray-500">{row.area}</td></tr>)}</tbody>
-                </table>
-              </div>
-            )}
-            {bulkResult && (
-              <div className={`rounded-xl p-4 ${bulkResult.failed === 0 ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
-                <p className={`font-semibold text-sm ${bulkResult.failed === 0 ? 'text-green-700' : 'text-amber-700'}`}>
-                  Upload Complete — {bulkResult.success} added{bulkResult.failed > 0 ? `, ${bulkResult.failed} failed` : ''}
-                </p>
-                {bulkResult.errors.length > 0 && <p className="text-xs text-amber-600 mt-1">Failed: {bulkResult.errors.join(', ')}</p>}
-              </div>
-            )}
-            <div className="flex gap-3 border-t border-gray-100 pt-4">
-              <button className="btn-secondary flex-1" onClick={() => { setShowBulk(false); setCsvRows([]); setCsvFile(null); setBulkResult(null) }}>Close</button>
-              {csvRows.length > 0 && !bulkResult && (
-                <button onClick={handleBulkUpload} disabled={bulkUploading} className="btn-primary flex-1 justify-center">
-                  {bulkUploading ? 'Uploading…' : `Upload ${csvRows.length} Records`}
-                </button>
-              )}
-            </div>
           </div>
         </div>
       )}
