@@ -9,7 +9,7 @@ import 'leaflet/dist/leaflet.css'
 function PlusBtn({ onClick, title }) {
   return (
     <button onClick={onClick} title={title}
-      className="opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 flex items-center justify-center rounded-full bg-accent/10 hover:bg-accent/20 text-accent shrink-0">
+      className="w-6 h-6 flex items-center justify-center rounded-full bg-accent/15 hover:bg-accent/30 text-accent shrink-0 transition-colors">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 4v16m8-8H4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
     </button>
   )
@@ -17,7 +17,7 @@ function PlusBtn({ onClick, title }) {
 function EditBtn({ onClick }) {
   return (
     <button onClick={onClick} title="Edit"
-      className="opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 flex items-center justify-center rounded-full hover:bg-blue-100 text-blue-500 shrink-0">
+      className="w-6 h-6 flex items-center justify-center rounded-full bg-blue-50 hover:bg-blue-100 text-blue-400 hover:text-blue-600 shrink-0 transition-colors">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" strokeWidth="2"/></svg>
     </button>
   )
@@ -25,7 +25,7 @@ function EditBtn({ onClick }) {
 function DelBtn({ onClick }) {
   return (
     <button onClick={onClick} title="Delete"
-      className="opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 flex items-center justify-center rounded-full hover:bg-red-100 text-red-400 shrink-0">
+      className="w-6 h-6 flex items-center justify-center rounded-full bg-red-50 hover:bg-red-100 text-red-300 hover:text-red-500 shrink-0 transition-colors">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
     </button>
   )
