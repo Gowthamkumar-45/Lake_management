@@ -149,8 +149,21 @@ export const outflowSources = crudResource('outflow-sources')
 // ── Geography ─────────────────────────────────────────────────────────────────
 export const geo = {
   taluks: () => request('/taluks/'),
+  addTaluk: (data) => request('/taluks/', { method: 'POST', body: JSON.stringify(data) }),
+  updateTaluk: (id, data) => request(`/taluks/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteTaluk: (id) => request(`/taluks/${id}/`, { method: 'DELETE' }),
   localBodies: (params = {}) => {
     const q = new URLSearchParams(params).toString()
     return request(`/local-bodies/${q ? '?' + q : ''}`)
+  },
+  addLocalBody: (data) => request('/local-bodies/', { method: 'POST', body: JSON.stringify(data) }),
+  updateLocalBody: (id, data) => request(`/local-bodies/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteLocalBody: (id) => request(`/local-bodies/${id}/`, { method: 'DELETE' }),
+  addVillage: (data) => request('/villages/', { method: 'POST', body: JSON.stringify(data) }),
+  updateVillage: (id, data) => request(`/villages/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteVillage: (id) => request(`/villages/${id}/`, { method: 'DELETE' }),
+  hierarchy: () => {
+    const token = localStorage.getItem('wbms_token')
+    return fetch(`${BASE}/geo/hierarchy/`, { headers: { Authorization: `Token ${token}` } }).then(r => r.json())
   },
 }

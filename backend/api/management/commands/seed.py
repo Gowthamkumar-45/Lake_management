@@ -27,7 +27,7 @@ LOCAL_BODIES = {
         ('Uchipuli Panchayat', 'Panchayat'),
         ('Thondi Panchayat', 'Panchayat'),
     ],
-    'Remeswaram': [
+    'Rameswaram': [
         ('Rameswaram Municipality', 'Municipality'),
         ('Pamban Town Panchayat', 'Town Panchayat'),
         ('Mandapam Town Panchayat', 'Town Panchayat'),
@@ -72,7 +72,7 @@ LOCAL_BODIES = {
 
 VILLAGES = {
     'Ramanathapuram': ['Ramanathapuram', 'Uchipuli', 'Thiruvangundram', 'Thondi', 'Keezhakkarai'],
-    'Remeswaram': ['Rameswaram', 'Pamban', 'Mandapam', 'Uchipuli South'],
+    'Rameswaram': ['Rameswaram', 'Pamban', 'Mandapam', 'Uchipuli South'],
     'Tiruvadanai': ['Tiruvadanai', 'Ervadi', 'Devipattinam', 'Muthupettai', 'Alagankulam'],
     'Kilakarai': ['Kilakarai', 'Keezhakkarai', 'Alagankulam'],
     'Paramakudi': ['Paramakudi', 'Sayalkudi', 'Perunali', 'Ilayangudi'],
@@ -84,7 +84,7 @@ VILLAGES = {
 
 OFFICERS = [
     ('M. Rajesh', 'AE', 'Ramanathapuram', 'MR', 'rajesh'),
-    ('V. Anand', 'AE', 'Remeswaram', 'VA', 'anand'),
+    ('V. Anand', 'AE', 'Rameswaram', 'VA', 'anand'),
     ('S. Devan', 'AEE', 'Kamuthi', 'SD', 'devan'),
     ('K. Suresh', 'AE', 'Paramakudi', 'KS', 'suresh'),
     ('P. Kumar', 'JE', 'Tiruvadanai', 'PK', 'kumar'),
@@ -207,7 +207,7 @@ class Command(BaseCommand):
         # Water bodies — generate spread across taluks
         TALUK_COUNTS = {
             'Ramanathapuram': 214, 'Paramakudi': 198, 'Tiruvadanai': 176,
-            'Mudukulathur': 152, 'Kamuthi': 141, 'Remeswaram': 118,
+            'Mudukulathur': 152, 'Kamuthi': 141, 'Rameswaram': 118,
             'Kadaladi': 148, 'RS Mangalam': 137, 'Kilakarai': 141,
         }
         all_taluk_names = [t for names in DIVISIONS.values() for t in names]
