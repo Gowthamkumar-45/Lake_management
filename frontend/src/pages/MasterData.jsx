@@ -558,11 +558,19 @@ export default function MasterData() {
       if (type === 'add-taluk') await geo.addTaluk({ district:1, name:vals.name, division })
       else if (type === 'edit-taluk') await geo.updateTaluk(item.id, { name:vals.name, division })
       else if (type === 'add-block') {
-        // parentId = taluk id (chosen in modal dropdown)
         const talukId = parseInt(vals.taluk_id || parentId)
         await geo.addLocalBody({ taluk:talukId, name:vals.name, lb_type:'Block', parent:null })
       }
       else if (type === 'edit-block') await geo.updateLocalBody(item.id, { name:vals.name })
+      else if (type === 'add-municipality') {
+        const talukId = parseInt(vals.taluk_id)
+        await geo.addLocalBody({ taluk:talukId, name:vals.name, lb_type:'Municipality', parent:null })
+      }
+      else if (type === 'add-town-panchayat') {
+        const talukId = parseInt(vals.taluk_id)
+        await geo.addLocalBody({ taluk:talukId, name:vals.name, lb_type:'Town Panchayat', parent:null })
+      }
+      else if (type === 'edit-localbody') await geo.updateLocalBody(item.id, { name:vals.name })
       else if (type === 'add-panchayat') await geo.addLocalBody({ taluk:item.talukId, name:vals.name, lb_type:vals.lb_type, parent:parentId })
       else if (type === 'edit-panchayat') await geo.updateLocalBody(item.id, { name:vals.name, lb_type:vals.lb_type })
       else if (type === 'add-village') await geo.addVillage({ panchayat:parentId, name:vals.name })
@@ -598,12 +606,15 @@ export default function MasterData() {
         { key:'new_division', label:'New Division Name', placeholder:'e.g. New Division', default:'' },
       ]
     }
-    if (type === 'add-block') {
+    if (type === 'add-block' || type === 'add-municipality' || type === 'add-town-panchayat') {
       const divTaluks = modal.divisionTaluks || []
+      const labels = { 'add-block':'Block Name', 'add-municipality':'Municipality Name', 'add-town-panchayat':'Town Panchayat Name' }
+      const placeholders = { 'add-block':'e.g. Rameswaram Block', 'add-municipality':'e.g. Ramanathapuram Municipality', 'add-town-panchayat':'e.g. Rameswaram Town Panchayat' }
+      const titles = { 'add-block':'Add Block', 'add-municipality':'Add Municipality', 'add-town-panchayat':'Add Town Panchayat' }
       return {
-        title: 'Add Block',
+        title: titles[type],
         fields: [
-          { key:'name', label:'Block Name', placeholder:'e.g. Rameswaram Block', autoFocus:true, default:'' },
+          { key:'name', label:labels[type], placeholder:placeholders[type], autoFocus:true, default:'' },
           { key:'taluk_id', label:'Under Taluk', type:'select', default: divTaluks[0]?.id?.toString() || '',
             options: divTaluks.map(t => ({ value: t.id.toString(), label: t.name })) },
         ]
@@ -612,6 +623,10 @@ export default function MasterData() {
     if (type === 'edit-block') return {
       title: 'Edit Block',
       fields: [{ key:'name', label:'Block Name', placeholder:'e.g. Rameswaram Block', autoFocus:true, default:item?.name||'' }]
+    }
+    if (type === 'edit-localbody') return {
+      title: `Edit ${item?.lb_type || 'Local Body'}`,
+      fields: [{ key:'name', label:'Name', autoFocus:true, default:item?.name||'' }]
     }
     if (type === 'add-panchayat' || type === 'edit-panchayat') return {
       title: type === 'add-panchayat' ? 'Add Panchayat' : 'Edit Panchayat',
@@ -678,9 +693,10 @@ export default function MasterData() {
               {[
                 { color:'bg-accent/10 text-accent border-accent/20', label:'District', desc:'Ramanathapuram' },
                 { color:'bg-blue-50 text-blue-700 border-blue-200', label:'Revenue Division', desc:'2 divisions' },
-                { color:'bg-teal-50 text-teal-700 border-teal-200', label:'Taluk', desc:'9 taluks' },
-                { color:'bg-purple-50 text-purple-700 border-purple-200', label:'Block', desc:'Panchayat Union Block' },
-                { color:'bg-orange-50 text-orange-700 border-orange-200', label:'Panchayat', desc:'Village Panchayat' },
+                { color:'bg-teal-50 text-teal-700 border-teal-200', label:'Taluk', desc:'Revenue administration' },
+                { color:'bg-purple-50 text-purple-700 border-purple-200', label:'Development (Block)', desc:'Panchayat Union Block' },
+                { color:'bg-amber-50 text-amber-700 border-amber-200', label:'Municipality', desc:'Urban local body' },
+                { color:'bg-orange-50 text-orange-700 border-orange-200', label:'Town Panchayat', desc:'Semi-urban local body' },
                 { color:'bg-gray-50 text-gray-600 border-gray-200', label:'Village', desc:'Habitations' },
               ].map(({ color, label, desc }) => (
                 <div key={label} className={`flex items-center gap-3 px-3 py-2 rounded-lg border ${color}`}>
@@ -746,112 +762,109 @@ export default function MasterData() {
                       <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform shrink-0 ${openDivs[div.name]?'rotate-90':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
                       <svg className="w-4 h-4 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
                       <span className="font-semibold text-blue-800 text-sm flex-1">{div.name}</span>
-                      <span className="text-xs text-blue-400 bg-blue-100 px-2 py-0.5 rounded-full">{div.taluks?.length} taluks · {div.blocks?.length} blocks</span>
+                      <span className="text-xs text-blue-400 bg-blue-100 px-2 py-0.5 rounded-full">{div.taluks?.length}T · {div.development?.length}B · {div.municipalities?.length}M · {div.town_panchayats?.length}TP</span>
                     </div>
 
                     {openDivs[div.name] && (
-                      <div className="ml-5 border-l-2 border-blue-100 pl-3 space-y-3 mb-2">
+                      <div className="ml-5 border-l-2 border-blue-100 pl-3 space-y-3 mb-2 pt-1">
 
-                        {/* ── TALUKS section ── */}
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[10px] font-bold text-teal-700 uppercase tracking-widest bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">Taluks</span>
-                            <button onClick={()=>setModal({type:'add-taluk',item:{division:div.name}})}
-                              className="flex items-center gap-1 text-[10px] font-semibold text-teal-600 hover:text-teal-800 hover:underline">
-                              + Add
-                            </button>
-                          </div>
-                          <div className="space-y-0.5">
-                            {div.taluks?.map(taluk => (
-                              <div key={taluk.id}>
-                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-teal-50 transition-colors">
-                                  <button onClick={() => setOpenTaluks(p=>({...p,[taluk.id]:!p[taluk.id]}))}
-                                    className="flex items-center gap-2 flex-1 text-left min-w-0">
-                                    <svg className={`w-2.5 h-2.5 text-gray-400 transition-transform shrink-0 ${openTaluks[taluk.id]?'rotate-90':''} ${!taluk.panchayats?.length?'opacity-0 pointer-events-none':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
-                                    <svg className="w-3.5 h-3.5 text-teal-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                                    <span className="font-medium text-gray-700 text-sm truncate">{taluk.name} Taluk</span>
-                                    {taluk.wb_count>0 && <span className="text-xs text-accent font-semibold bg-accent/10 px-1.5 py-0.5 rounded-full shrink-0">{taluk.wb_count} WB</span>}
-                                  </button>
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <PlusBtn title="Add Panchayat" onClick={e=>{e.stopPropagation();setModal({type:'add-panchayat',parentId:null,item:{talukId:taluk.id}})}} />
-                                    <EditBtn onClick={e=>{e.stopPropagation();setModal({type:'edit-taluk',item:{id:taluk.id,name:taluk.name,division:div.name}})}} />
-                                    <DelBtn onClick={e=>{e.stopPropagation();handleDelete('taluk',taluk)}} />
-                                  </div>
+                        {/* ── TALUKS ── */}
+                        <SectionBlock
+                          label="Taluks" color="teal"
+                          onAdd={()=>setModal({type:'add-taluk',item:{division:div.name}})}
+                          empty={!div.taluks?.length} emptyText="No taluks."
+                        >
+                          {div.taluks?.map(taluk => (
+                            <div key={taluk.id}>
+                              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-teal-50 transition-colors">
+                                <button onClick={()=>setOpenTaluks(p=>({...p,[taluk.id]:!p[taluk.id]}))} className="flex items-center gap-2 flex-1 text-left min-w-0">
+                                  <svg className="w-3.5 h-3.5 text-teal-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                  <span className="font-medium text-gray-700 text-sm truncate">{taluk.name}</span>
+                                  {taluk.wb_count>0 && <span className="text-xs text-accent font-semibold bg-accent/10 px-1.5 py-0.5 rounded-full shrink-0">{taluk.wb_count} WB</span>}
+                                </button>
+                                <div className="flex gap-1 shrink-0">
+                                  <EditBtn onClick={e=>{e.stopPropagation();setModal({type:'edit-taluk',item:{id:taluk.id,name:taluk.name,division:div.name}})}} />
+                                  <DelBtn onClick={e=>{e.stopPropagation();handleDelete('taluk',taluk)}} />
                                 </div>
-                                {openTaluks[taluk.id] && taluk.panchayats?.length > 0 && (
-                                  <div className="ml-5 border-l-2 border-teal-100 pl-3 space-y-0.5 mt-0.5 mb-1">
-                                    {taluk.panchayats.map(p => (
-                                      <PanchayatRow key={p.id} p={p} open={openPanchayats} setOpen={setOpenPanchayats}
-                                        onAddVillage={()=>setModal({type:'add-village',parentId:p.id})}
-                                        onEdit={()=>setModal({type:'edit-panchayat',item:{id:p.id,name:p.name,type:p.type}})}
-                                        onDelete={()=>handleDelete('panchayat',p)}
-                                        onEditVillage={v=>setModal({type:'edit-village',item:{id:v.id,name:v.name}})}
-                                        onDeleteVillage={v=>handleDelete('village',v)}
-                                      />
-                                    ))}
-                                  </div>
-                                )}
                               </div>
-                            ))}
-                          </div>
-                        </div>
+                            </div>
+                          ))}
+                        </SectionBlock>
 
-                        {/* ── BLOCKS section ── */}
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[10px] font-bold text-purple-700 uppercase tracking-widest bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full">Blocks</span>
-                            <button onClick={()=>setModal({type:'add-block', divisionTaluks: div.taluks})}
-                              className="flex items-center gap-1 text-[10px] font-semibold text-purple-600 hover:text-purple-800 hover:underline">
-                              + Add
-                            </button>
-                          </div>
-                          <div className="space-y-0.5">
-                            {div.blocks?.length === 0 && (
-                              <div className="px-3 py-1.5 text-xs text-gray-400 italic">
-                                No blocks yet.{' '}
-                                <button onClick={()=>setModal({type:'add-block',divisionTaluks:div.taluks})} className="text-purple-600 font-semibold hover:underline">+ Add Block</button>
-                              </div>
-                            )}
-                            {div.blocks?.map(block => (
-                              <div key={block.id}>
-                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-purple-50 transition-colors">
-                                  <button onClick={()=>setOpenBlocks(p=>({...p,[block.id]:!p[block.id]}))}
-                                    className="flex items-center gap-2 flex-1 text-left min-w-0">
-                                    <svg className={`w-2.5 h-2.5 text-gray-400 transition-transform shrink-0 ${openBlocks[block.id]?'rotate-90':''} ${!block.panchayats?.length?'opacity-0 pointer-events-none':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
-                                    <svg className="w-3.5 h-3.5 text-purple-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-                                    <span className="font-medium text-purple-800 text-sm truncate">{block.name}</span>
-                                    <span className="text-[10px] text-purple-400 bg-purple-100 px-1.5 py-0.5 rounded-full shrink-0">{block.taluk_name}</span>
-                                    {block.panchayats?.length > 0 && <span className="text-[10px] text-gray-400 shrink-0">{block.panchayats.length}p</span>}
-                                  </button>
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <PlusBtn title="Add Panchayat" onClick={e=>{e.stopPropagation();setModal({type:'add-panchayat',parentId:block.id,item:{talukId:block.taluk_id}})}} />
-                                    <EditBtn onClick={e=>{e.stopPropagation();setModal({type:'edit-block',item:{id:block.id,name:block.name}})}} />
-                                    <DelBtn onClick={e=>{e.stopPropagation();handleDelete('block',block)}} />
-                                  </div>
+                        {/* ── DEVELOPMENT (Blocks → Panchayats) ── */}
+                        <SectionBlock
+                          label="Development" color="purple"
+                          onAdd={()=>setModal({type:'add-block',divisionTaluks:div.taluks})}
+                          empty={!div.development?.length} emptyText="No blocks yet."
+                        >
+                          {div.development?.map(block => (
+                            <div key={block.id}>
+                              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-purple-50 transition-colors">
+                                <button onClick={()=>setOpenBlocks(p=>({...p,[block.id]:!p[block.id]}))} className="flex items-center gap-2 flex-1 text-left min-w-0">
+                                  <svg className={`w-2.5 h-2.5 text-gray-300 transition-transform shrink-0 ${openBlocks[block.id]?'rotate-90':''} ${!block.panchayats?.length?'opacity-0 pointer-events-none':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+                                  <svg className="w-3.5 h-3.5 text-purple-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                                  <span className="font-medium text-purple-800 text-sm truncate">{block.name}</span>
+                                  <span className="text-[10px] text-purple-400 bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded-full shrink-0">{block.taluk_name}</span>
+                                  {block.panchayats?.length > 0 && <span className="text-[10px] text-gray-400 shrink-0">{block.panchayats.length}p</span>}
+                                </button>
+                                <div className="flex gap-1 shrink-0">
+                                  <PlusBtn title="Add Panchayat" onClick={e=>{e.stopPropagation();setModal({type:'add-panchayat',parentId:block.id,item:{talukId:block.taluk_id}})}} />
+                                  <EditBtn onClick={e=>{e.stopPropagation();setModal({type:'edit-block',item:{id:block.id,name:block.name}})}} />
+                                  <DelBtn onClick={e=>{e.stopPropagation();handleDelete('block',block)}} />
                                 </div>
-                                {openBlocks[block.id] && (
-                                  <div className="ml-5 border-l-2 border-purple-100 pl-3 space-y-0.5 mt-0.5 mb-1">
-                                    {block.panchayats?.length === 0 && (
-                                      <div className="px-3 py-1 text-xs text-gray-400 italic">
-                                        No panchayats.{' '}
-                                        <button onClick={()=>setModal({type:'add-panchayat',parentId:block.id,item:{talukId:block.taluk_id}})} className="text-accent font-semibold hover:underline">+ Add</button>
-                                      </div>
-                                    )}
-                                    {block.panchayats?.map(p => (
-                                      <PanchayatRow key={p.id} p={p} open={openPanchayats} setOpen={setOpenPanchayats}
-                                        onAddVillage={()=>setModal({type:'add-village',parentId:p.id})}
-                                        onEdit={()=>setModal({type:'edit-panchayat',item:{id:p.id,name:p.name,type:p.type}})}
-                                        onDelete={()=>handleDelete('panchayat',p)}
-                                        onEditVillage={v=>setModal({type:'edit-village',item:{id:v.id,name:v.name}})}
-                                        onDeleteVillage={v=>handleDelete('village',v)}
-                                      />
-                                    ))}
-                                  </div>
-                                )}
                               </div>
-                            ))}
-                          </div>
-                        </div>
+                              {openBlocks[block.id] && block.panchayats?.length > 0 && (
+                                <div className="ml-6 border-l-2 border-purple-100 pl-3 space-y-0.5 mt-0.5 mb-1">
+                                  {block.panchayats.map(p => (
+                                    <PanchayatRow key={p.id} p={p} open={openPanchayats} setOpen={setOpenPanchayats}
+                                      onAddVillage={()=>setModal({type:'add-village',parentId:p.id})}
+                                      onEdit={()=>setModal({type:'edit-panchayat',item:{id:p.id,name:p.name,type:p.type}})}
+                                      onDelete={()=>handleDelete('panchayat',p)}
+                                      onEditVillage={v=>setModal({type:'edit-village',item:{id:v.id,name:v.name}})}
+                                      onDeleteVillage={v=>handleDelete('village',v)}
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </SectionBlock>
+
+                        {/* ── MUNICIPALITY ── */}
+                        <SectionBlock
+                          label="Municipality" color="amber"
+                          onAdd={()=>setModal({type:'add-municipality',divisionTaluks:div.taluks})}
+                          empty={!div.municipalities?.length} emptyText="No municipalities."
+                        >
+                          {div.municipalities?.map(m => (
+                            <LocalBodyRow key={m.id} item={m} open={openPanchayats} setOpen={setOpenPanchayats}
+                              color="amber"
+                              onAddVillage={()=>setModal({type:'add-village',parentId:m.id})}
+                              onEdit={()=>setModal({type:'edit-localbody',item:{id:m.id,name:m.name,lb_type:m.type}})}
+                              onDelete={()=>handleDelete('panchayat',m)}
+                              onEditVillage={v=>setModal({type:'edit-village',item:{id:v.id,name:v.name}})}
+                              onDeleteVillage={v=>handleDelete('village',v)}
+                            />
+                          ))}
+                        </SectionBlock>
+
+                        {/* ── TOWN PANCHAYAT ── */}
+                        <SectionBlock
+                          label="Town Panchayat" color="orange"
+                          onAdd={()=>setModal({type:'add-town-panchayat',divisionTaluks:div.taluks})}
+                          empty={!div.town_panchayats?.length} emptyText="No town panchayats."
+                        >
+                          {div.town_panchayats?.map(tp => (
+                            <LocalBodyRow key={tp.id} item={tp} open={openPanchayats} setOpen={setOpenPanchayats}
+                              color="orange"
+                              onAddVillage={()=>setModal({type:'add-village',parentId:tp.id})}
+                              onEdit={()=>setModal({type:'edit-localbody',item:{id:tp.id,name:tp.name,lb_type:tp.type}})}
+                              onDelete={()=>handleDelete('panchayat',tp)}
+                              onEditVillage={v=>setModal({type:'edit-village',item:{id:v.id,name:v.name}})}
+                              onDeleteVillage={v=>handleDelete('village',v)}
+                            />
+                          ))}
+                        </SectionBlock>
 
                       </div>
                     )}
@@ -1017,6 +1030,72 @@ function PanchayatRow({ p, open, setOpen, onAddVillage, onEdit, onDelete, onEdit
         <div className="ml-6 border-l-2 border-orange-100 pl-3 mt-0.5 mb-1 space-y-0.5">
           {p.villages.map(v=>(
             <div key={v.id} className="group flex items-center gap-2 px-3 py-1 rounded-lg hover:bg-gray-50 transition-colors">
+              <div className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0"/>
+              <span className="text-xs text-gray-500 flex-1">{v.name}</span>
+              <div className="flex gap-1 shrink-0">
+                <EditBtn onClick={e=>{e.stopPropagation();onEditVillage(v)}} />
+                <DelBtn onClick={e=>{e.stopPropagation();onDeleteVillage(v)}} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Section block wrapper (Taluks / Development / Municipality / Town Panchayat) ──
+const SECTION_COLORS = {
+  teal:   { badge:'text-teal-700 bg-teal-50 border-teal-200', add:'text-teal-600 hover:text-teal-800' },
+  purple: { badge:'text-purple-700 bg-purple-50 border-purple-200', add:'text-purple-600 hover:text-purple-800' },
+  amber:  { badge:'text-amber-700 bg-amber-50 border-amber-200', add:'text-amber-600 hover:text-amber-800' },
+  orange: { badge:'text-orange-700 bg-orange-50 border-orange-200', add:'text-orange-600 hover:text-orange-800' },
+}
+function SectionBlock({ label, color, onAdd, empty, emptyText, children }) {
+  const c = SECTION_COLORS[color] || SECTION_COLORS.teal
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className={`text-[10px] font-bold uppercase tracking-widest border px-2 py-0.5 rounded-full ${c.badge}`}>{label}</span>
+        <button onClick={onAdd} className={`text-[10px] font-semibold hover:underline ${c.add}`}>+ Add</button>
+      </div>
+      <div className="space-y-0.5">
+        {empty
+          ? <div className="px-3 py-1 text-xs text-gray-400 italic">{emptyText}</div>
+          : children
+        }
+      </div>
+    </div>
+  )
+}
+
+// ── Single LocalBody row (Municipality / Town Panchayat) ─────────────────────
+function LocalBodyRow({ item, open, setOpen, color, onAddVillage, onEdit, onDelete, onEditVillage, onDeleteVillage }) {
+  const colors = {
+    amber:  { hover:'hover:bg-amber-50', icon:'text-amber-500', border:'border-amber-100' },
+    orange: { hover:'hover:bg-orange-50', icon:'text-orange-500', border:'border-orange-100' },
+  }
+  const c = colors[color] || colors.orange
+  return (
+    <div>
+      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${c.hover} transition-colors`}>
+        <button onClick={()=>setOpen(p=>({...p,[item.id]:!p[item.id]}))} className="flex items-center gap-2 flex-1 text-left min-w-0">
+          <svg className={`w-2.5 h-2.5 text-gray-300 transition-transform shrink-0 ${open[item.id]?'rotate-90':''} ${!item.villages?.length?'opacity-0 pointer-events-none':''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+          <svg className={`w-3.5 h-3.5 shrink-0 ${c.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+          <span className="font-medium text-gray-700 text-sm truncate">{item.name}</span>
+          <span className="text-[10px] text-gray-400 shrink-0">{item.taluk_name}</span>
+          {item.villages?.length > 0 && <span className="text-[10px] text-gray-400 shrink-0">{item.villages.length}v</span>}
+        </button>
+        <div className="flex gap-1 shrink-0">
+          <PlusBtn title="Add Village" onClick={e=>{e.stopPropagation();onAddVillage()}} />
+          <EditBtn onClick={e=>{e.stopPropagation();onEdit()}} />
+          <DelBtn onClick={e=>{e.stopPropagation();onDelete()}} />
+        </div>
+      </div>
+      {open[item.id] && item.villages?.length > 0 && (
+        <div className={`ml-6 border-l-2 ${c.border} pl-3 mt-0.5 mb-1 space-y-0.5`}>
+          {item.villages.map(v => (
+            <div key={v.id} className="flex items-center gap-2 px-3 py-1 rounded-lg hover:bg-gray-50">
               <div className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0"/>
               <span className="text-xs text-gray-500 flex-1">{v.name}</span>
               <div className="flex gap-1 shrink-0">

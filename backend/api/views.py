@@ -234,18 +234,25 @@ class VillageViewSet(viewsets.ModelViewSet):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def geo_hierarchy_view(request):
-    """Returns hierarchy: Division → {Taluks (revenue), Blocks (panchayat union)} → Panchayat → Village"""
+    """Division → Taluks | Development (Blocks→Panchayats) | Municipality | Town Panchayat"""
     district = District.objects.first()
     taluks = Taluk.objects.select_related('district').prefetch_related(
         'local_bodies__villages',
         'local_bodies__children__villages',
     ).all().order_by('division', 'name')
 
-    def build_panchayat(lb):
+    def build_lb(lb):
         return {
-            'id': lb.id,
-            'name': lb.name,
-            'type': lb.lb_type,
+            'id': lb.id, 'name': lb.name, 'type': lb.lb_type,
+            'taluk_id': lb.taluk_id, 'taluk_name': lb.taluk.name,
+            'villages': [{'id': v.id, 'name': v.name} for v in lb.villages.all().order_by('name')],
+        }
+
+    def build_block(lb):
+        return {
+            'id': lb.id, 'name': lb.name,
+            'taluk_id': lb.taluk_id, 'taluk_name': lb.taluk.name,
+            'panchayats': [build_lb(child) for child in lb.children.all().order_by('name')],
             'villages': [{'id': v.id, 'name': v.name} for v in lb.villages.all().order_by('name')],
         }
 
@@ -253,35 +260,32 @@ def geo_hierarchy_view(request):
     for taluk in taluks:
         div = taluk.division or 'Unassigned'
         if div not in divisions:
-            divisions[div] = {'taluks': [], 'blocks': []}
+            divisions[div] = {'taluks': [], 'development': [], 'municipalities': [], 'town_panchayats': []}
 
-        # Taluks — only their direct panchayats (no blocks)
-        panchayats = [
-            build_panchayat(lb)
-            for lb in taluk.local_bodies.filter(parent__isnull=True).exclude(lb_type='Block').order_by('name')
-        ]
         divisions[div]['taluks'].append({
             'id': taluk.id,
             'name': taluk.name,
             'wb_count': taluk.water_bodies.count(),
-            'panchayats': panchayats,
         })
 
-        # Blocks — lifted to division level, separate from taluks
-        for lb in taluk.local_bodies.filter(lb_type='Block', parent__isnull=True).order_by('name'):
-            divisions[div]['blocks'].append({
-                'id': lb.id,
-                'name': lb.name,
-                'taluk_id': taluk.id,
-                'taluk_name': taluk.name,
-                'panchayats': [build_panchayat(child) for child in lb.children.all().order_by('name')],
-                'villages': [{'id': v.id, 'name': v.name} for v in lb.villages.all().order_by('name')],
-            })
+        for lb in taluk.local_bodies.filter(parent__isnull=True).order_by('name'):
+            if lb.lb_type == 'Block':
+                divisions[div]['development'].append(build_block(lb))
+            elif lb.lb_type == 'Municipality':
+                divisions[div]['municipalities'].append(build_lb(lb))
+            elif lb.lb_type == 'Town Panchayat':
+                divisions[div]['town_panchayats'].append(build_lb(lb))
 
     return Response({
         'district': district.name if district else 'Ramanathapuram',
         'divisions': [
-            {'name': k, 'taluks': v['taluks'], 'blocks': v['blocks']}
+            {
+                'name': k,
+                'taluks': v['taluks'],
+                'development': v['development'],
+                'municipalities': v['municipalities'],
+                'town_panchayats': v['town_panchayats'],
+            }
             for k, v in sorted(divisions.items())
         ],
     })
